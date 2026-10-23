@@ -1,0 +1,14 @@
+[package]
+# Unique per contest repo (new-contest sets it), as are the harness package and the binary name.
+name = "solution-ccc-classic2"
+description = "This contest's solvers: one src/levels/level<N>.rs per level."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+harness = { path = "../harness", package = "harness-ccc-classic2" }
+
+[[bin]]
+name = "ccc-ccc-classic2"
+path = "src/main.rs"

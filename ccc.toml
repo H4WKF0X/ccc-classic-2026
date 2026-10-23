@@ -1,0 +1,39 @@
+# Contest settings (committed). Machine-wide settings (e.g. credentials) go in ~/.config/ccc/config.toml,
+# personal overrides for this repo in ccc.local.toml (git-ignored). Later files win; empty values don't.
+
+# Set by new-contest.sh. `created` (Unix seconds) makes manual mode ignore zips in Downloads that
+# are older than this repo (they belong to an earlier contest or training run).
+name = "ccc-classic2"
+game_slug = ""
+created = "1792762432"
+
+# "codingcontest" (online): login/fetch/progress/submit talk to codingcontest.org (login read from Firefox).
+# "manual": switch with `cargo ccc mode manual` (stored per person in ccc.local.toml) when the login
+# doesn't work. You download each level's zip into Downloads (`fetch` waits for it, up to `fetch_wait`
+# seconds, default 570), and `submit` copies the outputs into Downloads for upload.
+platform = "codingcontest"
+
+# The <name> in the portal URL codingcontest.org/contests/<name>/game. Usually unnecessary: without it
+# the client uses your running contest registration, else your active training run.
+contest = ""
+
+# Levels with many valid answers are judged by the level's own `pub fn check` (see CLAUDE.md) and,
+# where it fits, by this external command running the game's own sandbox code (checker/README.md).
+# It only applies to levels that ship a sandbox-level-N.html, only once it accepts the official
+# example answer, and if it can't run you get a warning, never a block. "" turns it off.
+# Runs locked down (checker/node-safe.sh): the sandbox code may only read checker/ and work/.
+checker = "sh checker/node-safe.sh checker/sandbox-check.js {sandbox} {input} {output}"
+
+# Prompt-injection guard: after each fetch/ingest, compare the statement PDF's pages (what a human sees)
+# with its text layer (what an AI reads), using a locked-down headless Claude session (~5 s per level).
+# Hidden text -> the PDF is replaced by an image-only copy, the original goes to quarantine/.
+# Needs Ghostscript (`gs`) and the `claude` CLI; if either is missing it only warns. "off" disables it.
+guard = "on"
+guard_model = "claude-opus-5-5"
+guard_effort = "low"
+
+# Output line endings: "auto" copies the example output; "crlf" or "lf" force one.
+line_ending = "auto"
+
+# Where `cargo ccc ingest` without arguments looks for the newest level zip (default ~/Downloads).
+# downloads_dir = "/path/to/Downloads"

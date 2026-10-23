@@ -1,0 +1,17 @@
+[package]
+# Unique per contest repo (new-contest sets it); the crate is always used as `harness`.
+name = "harness-ccc-classic2"
+description = "CCC pipeline engine: I/O contract, ingest, validation, platform client. Levels never edit this."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "harness"
+
+[dependencies]
+lz4_flex = "0.14.0"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde_json = "1.0.154"
+ureq = "3.4.2"
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }

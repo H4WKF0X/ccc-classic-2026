@@ -1,0 +1,14 @@
+# Personal settings. Any key from ccc.toml can go here. Two places:
+#   ~/.config/ccc/config.toml   every contest repo on this machine (Windows: %APPDATA%\ccc\config.toml)
+#   ccc.local.toml              this repo only (git-ignored)
+#
+# Login: nothing to do if you're logged in to codingcontest.org in Firefox (it's read from there on
+# every command). Otherwise, one of:
+#
+# cookie = "PASTE_COOKIE_HEADER"      # DevTools -> Network -> any codingcontest.org request -> Cookie
+#
+# game_token = "PASTE_AUTHORIZATION_HEADER"   # from a request to https://<game>.codingcontest.org/api/...
+# game_url = "https://spaceship.codingcontest.org"
+# contest_slug = "PASTE_X_CCC_SLUG_HEADER"
+#
+# downloads_dir = "/home/me/Downloads"
