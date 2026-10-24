@@ -439,6 +439,19 @@ mod sym {
 /// positions and get their score by one addition. The beam combinations are enumerated
 /// depth-first with shared prefixes: emitter `k`'s beam is added to the hit counters of the
 /// first `k` emitters (bitsets for >=1, >=2, >=3 hits).
+///
+/// What makes it fast (each step measured on the bench; 7-11x beam5.c at equal width):
+/// - grouping options by beam (above) and fusing the last emitter level with the evaluation;
+/// - exact branch and bound ([`Search::hopeless`]): a child is only kept if it beats the
+///   parent's current `kcap`-th best child and the pool's current `keep`-th best state, so
+///   subtrees that cannot are skipped; this changes no result for a given seed;
+/// - a tight pool threshold: the pool merges duplicate states on insertion and is cut back to
+///   the best `keep` whenever it grows by half, so the global threshold is high early on;
+/// - no allocation per tick or parent, const-generic bitset width, popcnt/AVX2 code at runtime.
+///
+/// Per tick: every parent's best `kcap` children go into the pool (deduplicated, also up to
+/// swapping opposite emitters, see [`Geo::lc`]); the best `pool * width` are materialised,
+/// states close to completion are reranked by the tail heuristic, and the best `width` survive.
 mod beam {
     use super::geo::{Bits, EMPTY, Geo, MAXW};
     use super::sim::{self, State};
