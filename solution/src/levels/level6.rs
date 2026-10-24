@@ -171,6 +171,11 @@ mod geo {
         /// `line[j * 6 + k]`: window offset (see [`Geo::window_start`]) at which emitter `k`'s
         /// beam crosses pattern cell `j`.
         pub line: Vec<u8>,
+        /// `lc[k * ring + p]`: emitter `k`'s position `p` in common line coordinates of the pair
+        /// `k mod 3`, `k mod 3 + 3`: they fire along the same lines, in opposite order of their
+        /// window offsets (tested), so swapping their (line, on) states changes nothing. Positions
+        /// outside the window get unique values.
+        pub lc: Vec<u16>,
     }
 
     impl Geo {
@@ -209,7 +214,18 @@ mod geo {
                     }
                 })
                 .collect();
-            let mut geo = Geo { r, ring, nw: nrel.div_ceil(64).max(1), npat, pat, halo, beam, beam_id, line: Vec::new() };
+            let mut geo =
+                Geo { r, ring, nw: nrel.div_ceil(64).max(1), npat, pat, halo, beam, beam_id, line: Vec::new(), lc: Vec::new() };
+            geo.lc = (0..6 * ring)
+                .map(|kp| {
+                    let (k, o) = (kp / ring, geo.offset(kp / ring, kp % ring));
+                    match (o <= 2 * r, k < 3) {
+                        (true, true) => o as u16,
+                        (true, false) => (2 * r - o) as u16,
+                        (false, _) => (100 + o + ring * k) as u16,
+                    }
+                })
+                .collect();
             geo.line = (0..npat * 6)
                 .map(|jk| {
                     let (j, k) = (jk / 6, jk % 6);
@@ -711,7 +727,7 @@ mod beam {
                     }
                     for &(key, code) in &self.local.heap {
                         let child = sim::step::<NW>(self.geo, parent, code);
-                        self.pool.push(Cand { key, hash: hash::<NW>(&child), parent: pi as u32, code });
+                        self.pool.push(Cand { key, hash: hash::<NW>(self.geo, &child), parent: pi as u32, code });
                     }
                     if self.pool.len() >= cap {
                         self.compact(keep);
@@ -1092,20 +1108,24 @@ mod beam {
         d_up.min(d_down)
     }
 
+    /// Hash of a state up to swapping the (line, on) states of opposite emitters (see
+    /// [`Geo::lc`]): such states have the same future, so the beam keeps only one of them.
     #[inline(always)]
-    fn hash<const NW: usize>(s: &State) -> u64 {
+    fn hash<const NW: usize>(geo: &Geo, s: &State) -> u64 {
         const K: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut h = K;
         for w in 0..NW {
             h = (h ^ s.m[w]).wrapping_mul(K);
             h ^= h >> 29;
         }
-        let mut e = s.act as u64 | (s.subs as u64) << 8;
-        for k in 0..6 {
-            e |= (s.pos[k] as u64) << (16 + 8 * k);
+        let key = |k: usize| (geo.lc[k * geo.ring + s.pos[k] as usize] as u64) << 1 | (s.act >> k & 1) as u64;
+        h = (h ^ s.subs as u64).wrapping_mul(K);
+        for a in 0..3 {
+            let (x, y) = (key(a), key(a + 3));
+            h = (h ^ (x.min(y) << 16 | x.max(y))).wrapping_mul(K);
+            h ^= h >> 29;
         }
-        h = (h ^ e).wrapping_mul(K);
-        h ^ (h >> 31)
+        h
     }
 }
 
@@ -1208,6 +1228,7 @@ mod opt {
         geos: Vec<Option<Geo>>,
         best: Option<Vec<Action>>,
         attempts: u64,
+        improved: u64,
     }
 
     impl CaseRun<'_> {
@@ -1273,6 +1294,7 @@ mod opt {
                 self.attempts - 1
             );
             self.best = Some(prog[..len].to_vec());
+            self.improved += 1;
         }
     }
 
@@ -1291,6 +1313,7 @@ mod opt {
         let rounds = env_u64("L6_ROUNDS").unwrap_or(if harness::budget::per_file().is_some() { u64::MAX } else { 0 });
         let geos: Vec<Geo> = cases.iter().map(|c| Geo::new(&c.pattern)).collect();
         let seeded = seeds::load(cases, &geos);
+        let seed_total: usize = seeded.iter().flatten().map(Vec::len).sum();
         let runs: Vec<Mutex<CaseRun>> = cases
             .iter()
             .zip(geos)
@@ -1299,7 +1322,7 @@ mod opt {
             .map(|(index, ((case, geo), best))| {
                 let mut geos: Vec<Option<Geo>> = (0..12).map(|_| None).collect();
                 geos[0] = Some(geo);
-                Mutex::new(CaseRun { index, case, geos, best, attempts: 0 })
+                Mutex::new(CaseRun { index, case, geos, best, attempts: 0, improved: 0 })
             })
             .collect();
         let schedule = Mutex::new(Schedule {
@@ -1331,7 +1354,17 @@ mod opt {
                 }
             }
         });
-        runs.into_iter().map(|r| r.into_inner().unwrap().best.expect("every case was built")).collect()
+        let runs: Vec<CaseRun> = runs.into_iter().map(|r| r.into_inner().unwrap()).collect();
+        let total: usize = runs.iter().map(|r| r.best.as_ref().map_or(0, |b| b.len())).sum();
+        harness::trace!(
+            "{} cases: {} lines (seeds {}), {} attempts, {} improvements",
+            cases.len(),
+            total,
+            seed_total,
+            runs.iter().map(|r| r.attempts).sum::<u64>(),
+            runs.iter().map(|r| r.improved).sum::<u64>()
+        );
+        runs.into_iter().map(|r| r.best.expect("every case was built")).collect()
     }
 }
 
@@ -1359,6 +1392,34 @@ mod tests {
 
     fn programs(out: &[String]) -> Vec<Vec<Action>> {
         split_programs(out).iter().map(|p| parse_program(p).unwrap().iter().map(pack).collect()).collect()
+    }
+
+    /// Emitters `e` and `e + 3` fire along the same board lines in opposite order: offset `o`
+    /// of `e + 3` hits exactly the cells of offset `2R - o` of `e` (the basis of [`geo::Geo::lc`]).
+    #[test]
+    fn opposite_emitters_share_lines() {
+        for name in ["0-example", "1-small", "2-medium", "3-large", "4-enormous"] {
+            let Ok(input) = std::fs::read_to_string(Path::new(ROOT).join(format!("work/level6/in/in_level-6_{name}.txt")))
+            else {
+                continue;
+            };
+            for c in parse(&input) {
+                let geo = Geo::new(&c.pattern);
+                let b = &c.pattern.board;
+                let ring = crate::model::border_ring(geo.r);
+                let cells = |k: usize, o: usize| {
+                    let (y, x) = ring[geo.pos_at(k, o)];
+                    let mut v = b.beam_cells(y, x, k as u8 + 1);
+                    v.sort();
+                    v
+                };
+                for k in 0..3 {
+                    for o in 0..=2 * geo.r {
+                        assert_eq!(cells(k + 3, o), cells(k, 2 * geo.r - o), "R={} k={k} o={o}", geo.r);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1462,6 +1523,48 @@ mod tests {
                 100.0 * st.leaves as f64 / st.nominal as f64,
             );
         }
+    }
+
+    /// Quality benchmark (not a test): total lines of from-scratch attempts over every `step`-th
+    /// case of each real input, for seeds `0..L6_QUAL_SEEDS`, at width `L6_QUAL_W`:
+    /// `L6_QUAL_W=800 cargo test --release quality -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn quality() {
+        let width: usize = std::env::var("L6_QUAL_W").ok().and_then(|v| v.parse().ok()).unwrap_or(800);
+        let seeds: u64 = std::env::var("L6_QUAL_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
+        let step: usize = std::env::var("L6_QUAL_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(19);
+        let mut items = Vec::new();
+        for file in ["2-medium", "3-large", "4-enormous"] {
+            let input =
+                std::fs::read_to_string(Path::new(ROOT).join(format!("work/level6/in/in_level-6_{file}.txt"))).unwrap();
+            for (i, c) in parse(&input).into_iter().enumerate().filter(|(i, _)| i % step == 0) {
+                for seed in 0..seeds {
+                    items.push((file, i, c.count, Geo::new(&c.pattern), seed));
+                }
+            }
+        }
+        let t0 = std::time::Instant::now();
+        let res = harness::par::map_threads(8, &items, |(_, _, count, geo, seed)| {
+            let prm = beam::Params { width, ..Default::default() };
+            let t = std::time::Instant::now();
+            let (prog, st) = beam::search(geo, &State::start(geo), *count, 999, &prm, *seed, &|| false);
+            (prog.map_or(999, |p| p.len()), t.elapsed().as_secs_f64(), st.nominal)
+        });
+        for file in ["2-medium", "3-large", "4-enormous"] {
+            let sel: Vec<_> = items.iter().zip(&res).filter(|(it, _)| it.0 == file).map(|(_, r)| r).collect();
+            let lines: usize = sel.iter().map(|r| r.0).sum();
+            let secs: f64 = sel.iter().map(|r| r.1).sum();
+            println!("{file}: {} runs, {lines} lines, {secs:.1} cpu-s", sel.len());
+        }
+        let lines: usize = res.iter().map(|r| r.0).sum();
+        let secs: f64 = res.iter().map(|r| r.1).sum();
+        let nominal: u64 = res.iter().map(|r| r.2).sum();
+        println!(
+            "TOTAL W={width}: {lines} lines, {secs:.1} cpu-s ({:.1} s wall), {:.0} M nominal children/cpu-s",
+            t0.elapsed().as_secs_f64(),
+            nominal as f64 / secs / 1e6
+        );
     }
 
     #[test]
