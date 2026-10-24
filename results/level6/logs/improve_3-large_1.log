@@ -1,0 +1,6 @@
+3-large case 13 R=6 n=1 start 6 (best file 6)
+  window 0->1 len 6: FEASIBLE (0s)
+  -> spliced: 6 -> 5
+  window 0->1 len 5: INFEASIBLE (0s)
+3-large case 13: 6 -> 5
+3-large case 35 R=8 n=1 start 9 (best file 9)

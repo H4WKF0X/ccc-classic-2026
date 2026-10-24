@@ -204,3 +204,7 @@
 2-medium case 207 R=5 count=15 cells= 22 best= 61 sound=ok T=60: UNKNOWN 60.4s 
 2-medium case 208 R=3 count= 9 cells=  5 best= 19 sound=ok T=18: INFEASIBLE 0.3s 
 2-medium case 209 R=3 count= 4 cells=  7 best=  8 sound=ok T=7: INFEASIBLE 0.1s 
+2-medium case  80 R=5 count=18 cells= 16 best= 74 sound=ok T=73: UNKNOWN 600.4s 
+2-medium case 107 R=4 count=16 cells= 19 best= 66 sound=ok T=65: UNKNOWN 600.4s 
+2-medium case 130 R=5 count=15 cells= 23 best= 77 sound=ok T=76: UNKNOWN 600.7s 
+2-medium case 203 R=5 count=16 cells= 17 best= 66 sound=ok T=65: UNKNOWN 600.5s 

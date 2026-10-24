@@ -92,3 +92,44 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def markdown():
+    """Markdown tables for docs/level6-theory.md (run after main())."""
+    rs = list(csv.DictReader(open(os.path.join(RES, 'bounds.csv'))))
+    for r in rs:
+        for k in ('best', 'best_new', 'lb', 'gap', 'proven_optimal', 'count', 'cells', 'R'):
+            r[k] = int(r[k])
+    print('| file | cases | best (work/level6/best) | best incl. this research | lower bound | gap | proven optimal |')
+    print('|---|---:|---:|---:|---:|---:|---:|')
+    groups = [(k, [r for r in rs if r['file'] == k]) for k in KEYS]
+    groups.append(('**scored (2+3+4)**', [r for r in rs if r['file'] != '1-small']))
+    groups.append(('scored without enormous', [r for r in rs if r['file'] in ('2-medium', '3-large')]))
+    for k, g in groups:
+        print(f'| {k} | {len(g)} | {sum(r["best"] for r in g)} | {sum(r["best_new"] for r in g)} | '
+              f'{sum(r["lb"] for r in g)} | {sum(r["gap"] for r in g)} | {sum(r["proven_optimal"] for r in g)} |')
+    print()
+    for k in ('2-medium', '3-large'):
+        g = [r for r in rs if r['file'] == k and r['gap'] > 0 and r['first_lb'] != '' and r['rest_lb'] != '']
+        fg = sum(int(r['first_best']) - int(r['first_lb']) for r in g)
+        rg = sum(int(r['rest_best']) - int(r['rest_lb']) for r in g)
+        print(f'{k}: {len(g)} open cases; first-copy slack (first_best - F1) = {fg}, '
+              f'later-copies slack (rest_best - B(n-1)) = {rg}')
+        buckets = {}
+        for r in [r for r in rs if r['file'] == k]:
+            b = '0' if r['gap'] == 0 else '1-2' if r['gap'] <= 2 else '3-9' if r['gap'] <= 9 else \
+                '10-29' if r['gap'] <= 29 else '30+'
+            buckets.setdefault(b, [0, 0])
+            buckets[b][0] += 1
+            buckets[b][1] += r['gap']
+        print('  gap histogram (cases, summed gap):', {b: tuple(v) for b, v in sorted(buckets.items())})
+    print()
+    print('| file | case | R | count | cells | best | lb | gap | F1 lb / first copy in best | later copies: bound / best |')
+    print('|---|---:|---:|---:|---:|---:|---:|---:|---|---|')
+    for r in sorted([r for r in rs if r['file'] != '4-enormous'], key=lambda r: -r['gap'])[:25]:
+        print(f'| {r["file"]} | {r["case"]} | {r["R"]} | {r["count"]} | {r["cells"]} | {r["best_new"]} | {r["lb"]} | '
+              f'{r["gap"]} | {r["first_lb"]} / {r["first_best"]} | {r["rest_lb"]} / {r["rest_best"]} |')
+
+
+if __name__ == '__main__' and '--md' in sys.argv:
+    markdown()
