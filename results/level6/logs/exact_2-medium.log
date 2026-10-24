@@ -208,3 +208,6 @@
 2-medium case 107 R=4 count=16 cells= 19 best= 66 sound=ok T=65: UNKNOWN 600.4s 
 2-medium case 130 R=5 count=15 cells= 23 best= 77 sound=ok T=76: UNKNOWN 600.7s 
 2-medium case 203 R=5 count=16 cells= 17 best= 66 sound=ok T=65: UNKNOWN 600.5s 
+2-medium case   6 R=3 count=13 cells=  4 best= 27 sound=ok(search) T=26: INFEASIBLE 0.4s 
+2-medium case   7 R=4 count=13 cells=  4 best= 15 sound=ok(search) T=14: INFEASIBLE 0.2s 
+2-medium case  17 R=3 count=15 cells= 11 best= 31 sound=ok(search) T=30: INFEASIBLE 0.6s 

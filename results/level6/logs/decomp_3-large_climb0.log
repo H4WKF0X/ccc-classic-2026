@@ -12,3 +12,4 @@
 3-large case  80 R=6 n=3 cells=70 best=33 first=12 F={1: 9, 2: 15, 3: 21} W={1: 6, 2: 12} lb=21 [W1@9:UNK(38s) W1@6:UNK(150s) F1@11:UNK(28s) F1@9:UNK(84s) BUDGET BUDGET BUDGET]
 3-large case 162 R=6 n=2 cells=73 best=25 first=14 F={1: 7, 2: 14} W={1: 7} lb=14 [W1@10:UNK(38s) W1@6:INF(141s) W1@7:UNK(121s) BUDGET BUDGET]
 3-large case  95 R=8 n=5 cells=22 best=37 first=9 F={1: 8, 2: 13, 3: 18} W={1: 5, 2: 10, 3: 15} lb=28 [W1@6:UNK(38s) W1@5:UNK(150s) F1@8:UNK(28s) W2@13:UNK(21s) W2@10:UNK(63s) BUDGET BUDGET BUDGET]
+3-large case 183 R=8 n=3 cells=37 best=26 first=10 F={1: 8, 2: 14, 3: 20} W={1: 6, 2: 12} lb=20 [W1@7:UNK(38s) W1@5:INF(32s) W1@6:UNK(150s) F1@8:UNK(20s) W2@15:UNK(15s) W2@12:UNK(45s) BUDGET BUDGET]
