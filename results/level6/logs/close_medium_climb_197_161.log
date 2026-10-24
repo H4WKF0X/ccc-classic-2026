@@ -1,0 +1,6 @@
+case 197 W2 at T=12: UNKNOWN (900.2s)
+case 197 W1 at T=6: UNKNOWN (900.1s)
+case 197 W2 at T=13: UNKNOWN (900.2s)
+case 197 W3 at T=18: UNKNOWN (900.2s)
+case 161 W1 at T=6: UNKNOWN (900.1s)
+case 161 W1 at T=6: INFEASIBLE (1315.2s)  -> W_k >= 7

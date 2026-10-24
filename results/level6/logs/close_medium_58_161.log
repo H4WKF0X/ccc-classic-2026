@@ -1,0 +1,6 @@
+case 58 W2 at T=10: INFEASIBLE (608.1s)  -> W_k >= 11
+case 58 W3 at T=17: UNKNOWN (900.6s)
+case 58 W4 at T=23: UNKNOWN (900.9s)
+case 58 W4 at T=22: UNKNOWN (1800.4s)
+case 132 W1 at T=6: INFEASIBLE (1566.3s)  -> W_k >= 7
+case 132 W1 at T=7: UNKNOWN (1800.3s)
