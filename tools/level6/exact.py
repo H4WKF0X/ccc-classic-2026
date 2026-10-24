@@ -69,13 +69,21 @@ def main():
     ap.add_argument('--cases', default='all')
     ap.add_argument('--secs', type=float, default=120)
     ap.add_argument('--workers', type=int, default=4)
+    ap.add_argument('--redo', action='store_true', help='re-run cases already in the CSV (new row wins)')
+    ap.add_argument('--unknown', action='store_true', help='only cases whose last row is not INFEASIBLE')
     A = ap.parse_args()
     cases, best = load(A.key)
     idx = range(len(cases)) if A.cases == 'all' else [int(v) for v in A.cases.split(',')]
     path = os.path.join(RES, f'exact_{A.key}.csv')
-    done = set()
+    done, last = set(), {}
     if os.path.exists(path):
-        done = {int(r['case']) for r in csv.DictReader(open(path))}
+        for r in csv.DictReader(open(path)):
+            last[int(r['case'])] = r
+        done = set(last)
+    if A.redo:
+        done = set()
+    if A.unknown:
+        done = {i for i, r in last.items() if r['status'] == 'INFEASIBLE'}
     new = not os.path.exists(path)
     f = open(path, 'a', newline='')
     w = csv.writer(f)
@@ -91,7 +99,7 @@ def main():
         st = project(lg, best[i])
         sound = 'n/a'
         if st is not None:
-            s, _ = satmodel.solve(lg, b, c, secs=60, workers=A.workers, extra=fixed(st))
+            s, _ = satmodel.solve(lg, b, c, secs=60, workers=A.workers, extra=fixed(st), symbreak=False)
             sound = 'ok' if s == 'FEASIBLE' else 'FAIL:' + s
         else:   # program walks round the back of the ring: just check the model is feasible at T=best
             s, _ = satmodel.solve(lg, b, c, secs=60, workers=A.workers)

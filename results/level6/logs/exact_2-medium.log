@@ -1,0 +1,206 @@
+2-medium case   4 R=4 count= 3 cells= 10 best=  8 sound=ok T=7: INFEASIBLE 0.4s 
+2-medium case   5 R=4 count= 7 cells=  9 best= 15 sound=ok T=14: INFEASIBLE 0.8s 
+2-medium case   6 R=3 count=13 cells=  4 best= 27 sound=n/a T=26: INFEASIBLE 1.1s 
+2-medium case   7 R=4 count=13 cells=  4 best= 15 sound=n/a T=14: INFEASIBLE 0.6s 
+2-medium case   8 R=3 count= 5 cells=  9 best= 11 sound=ok T=10: INFEASIBLE 0.5s 
+2-medium case   9 R=5 count=17 cells= 16 best= 53 sound=ok T=52: INFEASIBLE 31.7s 
+2-medium case  10 R=4 count= 9 cells= 15 best= 28 sound=ok T=27: INFEASIBLE 5.2s 
+2-medium case  11 R=4 count= 9 cells=  8 best= 19 sound=ok T=18: INFEASIBLE 0.6s 
+2-medium case  12 R=3 count=13 cells=  6 best= 27 sound=ok T=26: INFEASIBLE 0.4s 
+2-medium case  13 R=3 count=12 cells=  7 best= 25 sound=ok T=24: INFEASIBLE 0.5s 
+2-medium case  14 R=3 count=14 cells= 10 best= 29 sound=ok T=28: INFEASIBLE 1.0s 
+2-medium case  15 R=4 count= 5 cells= 10 best= 16 sound=ok T=15: INFEASIBLE 6.2s 
+2-medium case  16 R=5 count=17 cells=  6 best= 19 sound=ok T=18: INFEASIBLE 0.1s 
+2-medium case  17 R=3 count=15 cells= 11 best= 31 sound=n/a T=30: INFEASIBLE 0.9s 
+2-medium case  18 R=3 count=14 cells= 13 best= 29 sound=ok T=28: INFEASIBLE 0.7s 
+2-medium case  19 R=3 count=13 cells=  8 best= 27 sound=ok T=26: INFEASIBLE 0.5s 
+2-medium case  20 R=4 count= 1 cells=  9 best=  4 sound=ok T=3: INFEASIBLE 0.1s 
+2-medium case  21 R=4 count=17 cells= 14 best= 53 sound=ok T=52: INFEASIBLE 13.0s 
+2-medium case  22 R=4 count= 7 cells= 11 best= 22 sound=ok T=21: INFEASIBLE 3.7s 
+2-medium case  23 R=3 count=14 cells=  9 best= 29 sound=ok T=28: INFEASIBLE 1.1s 
+2-medium case  24 R=5 count=19 cells=  5 best= 38 sound=ok T=37: INFEASIBLE 1.5s 
+2-medium case  25 R=5 count=17 cells= 14 best= 53 sound=ok T=52: INFEASIBLE 23.5s 
+2-medium case  26 R=5 count=10 cells= 16 best= 52 sound=ok T=51: UNKNOWN 300.5s 
+2-medium case  27 R=3 count= 6 cells=  7 best= 13 sound=ok T=12: INFEASIBLE 0.2s 
+2-medium case  28 R=4 count=12 cells= 20 best= 50 sound=ok T=49: INFEASIBLE 134.1s 
+2-medium case  29 R=4 count=12 cells= 11 best= 25 sound=ok T=24: INFEASIBLE 1.5s 
+2-medium case  30 R=5 count= 7 cells= 23 best= 37 sound=ok T=36: UNKNOWN 60.3s 
+2-medium case  31 R=4 count= 2 cells= 32 best= 11 sound=ok T=10: INFEASIBLE 10.8s 
+2-medium case  32 R=3 count= 6 cells= 19 best= 18 sound=ok T=17: INFEASIBLE 0.8s 
+2-medium case  33 R=5 count=19 cells=  8 best= 40 sound=ok T=39: INFEASIBLE 3.9s 
+2-medium case  34 R=5 count= 3 cells= 16 best= 10 sound=ok T=9: INFEASIBLE 0.6s 
+2-medium case  35 R=5 count=17 cells= 21 best= 86 sound=ok T=85: UNKNOWN 60.3s 
+2-medium case  36 R=3 count= 3 cells=  8 best=  7 sound=ok T=6: INFEASIBLE 0.1s 
+2-medium case  37 R=4 count=15 cells= 10 best= 31 sound=ok T=30: INFEASIBLE 1.1s 
+2-medium case  38 R=3 count= 7 cells=  8 best= 15 sound=ok T=14: INFEASIBLE 0.3s 
+2-medium case  39 R=4 count= 6 cells=  8 best= 14 sound=ok T=13: INFEASIBLE 0.7s 
+2-medium case  40 R=3 count=14 cells= 10 best= 43 sound=ok T=42: INFEASIBLE 4.0s 
+2-medium case  41 R=4 count= 1 cells= 14 best=  4 sound=ok T=3: INFEASIBLE 0.1s 
+2-medium case  42 R=3 count= 5 cells=  6 best= 11 sound=ok T=10: INFEASIBLE 0.2s 
+2-medium case  43 R=3 count= 2 cells=  5 best=  5 sound=ok T=4: INFEASIBLE 0.1s 
+2-medium case  44 R=5 count=14 cells= 10 best= 43 sound=ok T=42: INFEASIBLE 5.2s 
+2-medium case  45 R=5 count= 2 cells= 14 best=  7 sound=ok T=6: INFEASIBLE 0.2s 
+2-medium case  46 R=4 count= 8 cells=  8 best= 17 sound=ok T=16: INFEASIBLE 0.3s 
+2-medium case  47 R=3 count=11 cells=  8 best= 23 sound=ok T=22: INFEASIBLE 0.7s 
+2-medium case  48 R=4 count=15 cells= 13 best= 46 sound=ok T=45: INFEASIBLE 7.8s 
+2-medium case  49 R=5 count=16 cells= 22 best= 82 sound=ok T=81: UNKNOWN 60.4s 
+2-medium case  50 R=5 count=19 cells= 19 best=109 sound=ok T=108: UNKNOWN 60.4s 
+2-medium case  51 R=4 count=10 cells=  7 best= 21 sound=ok T=20: INFEASIBLE 0.4s 
+2-medium case  52 R=4 count= 6 cells=  5 best= 13 sound=ok T=12: INFEASIBLE 0.2s 
+2-medium case  53 R=3 count=17 cells=  6 best= 35 sound=ok T=34: INFEASIBLE 0.7s 
+2-medium case  54 R=3 count= 4 cells= 13 best=  9 sound=ok T=8: INFEASIBLE 0.1s 
+2-medium case  55 R=3 count=18 cells= 13 best= 37 sound=ok T=36: INFEASIBLE 0.7s 
+2-medium case  56 R=5 count=15 cells=  8 best= 46 sound=ok T=45: INFEASIBLE 7.8s 
+2-medium case  57 R=4 count=12 cells= 12 best= 25 sound=ok T=24: INFEASIBLE 1.2s 
+2-medium case  58 R=5 count= 5 cells= 22 best= 32 sound=ok T=31: UNKNOWN 60.2s 
+2-medium case  59 R=5 count= 5 cells= 36 best= 27 sound=ok T=26: UNKNOWN 60.1s 
+2-medium case  60 R=3 count=14 cells= 10 best= 29 sound=ok T=28: INFEASIBLE 0.5s 
+2-medium case  61 R=3 count=15 cells= 10 best= 31 sound=ok T=30: INFEASIBLE 0.6s 
+2-medium case  62 R=5 count=10 cells=  9 best= 31 sound=ok T=30: INFEASIBLE 5.8s 
+2-medium case  63 R=3 count= 2 cells= 10 best=  7 sound=ok T=6: INFEASIBLE 0.1s 
+2-medium case  64 R=3 count= 6 cells=  6 best= 12 sound=ok T=11: INFEASIBLE 0.2s 
+2-medium case  65 R=5 count= 1 cells= 14 best=  4 sound=ok T=3: INFEASIBLE 0.1s 
+2-medium case  66 R=4 count=10 cells= 11 best= 21 sound=ok T=20: INFEASIBLE 0.6s 
+2-medium case  67 R=5 count=15 cells=  5 best= 31 sound=ok(search) T=30: INFEASIBLE 0.8s 
+2-medium case  68 R=3 count=12 cells= 12 best= 25 sound=ok T=24: INFEASIBLE 0.5s 
+2-medium case  69 R=4 count= 4 cells=  4 best=  6 sound=ok T=5: INFEASIBLE 0.1s 
+2-medium case  70 R=4 count=14 cells= 17 best= 43 sound=ok T=42: INFEASIBLE 10.1s 
+2-medium case  71 R=5 count=18 cells=  5 best= 21 sound=ok(search) T=20: INFEASIBLE 0.1s 
+2-medium case  72 R=4 count=16 cells= 13 best= 50 sound=ok T=49: INFEASIBLE 14.3s 
+2-medium case  73 R=3 count=10 cells=  9 best= 21 sound=ok T=20: INFEASIBLE 0.4s 
+2-medium case  74 R=3 count= 7 cells= 12 best= 15 sound=ok T=14: INFEASIBLE 0.2s 
+2-medium case  75 R=3 count= 2 cells= 11 best=  5 sound=ok T=4: INFEASIBLE 0.1s 
+2-medium case  76 R=3 count=14 cells=  7 best= 28 sound=ok T=27: INFEASIBLE 0.4s 
+2-medium case  77 R=4 count= 8 cells= 19 best= 33 sound=ok T=32: INFEASIBLE 59.5s 
+2-medium case  78 R=3 count=12 cells=  8 best= 25 sound=ok T=24: INFEASIBLE 0.8s 
+2-medium case  79 R=3 count= 2 cells=  4 best=  5 sound=ok T=4: INFEASIBLE 0.1s 
+2-medium case  80 R=5 count=18 cells= 16 best= 74 sound=ok T=73: UNKNOWN 60.5s 
+2-medium case  81 R=3 count= 2 cells= 13 best=  6 sound=ok T=5: INFEASIBLE 0.3s 
+2-medium case  82 R=3 count= 2 cells= 11 best=  6 sound=ok T=5: INFEASIBLE 0.2s 
+2-medium case  83 R=5 count= 4 cells=  8 best= 13 sound=ok T=12: INFEASIBLE 1.7s 
+2-medium case  84 R=5 count= 9 cells= 15 best= 28 sound=ok T=27: INFEASIBLE 4.8s 
+2-medium case  85 R=4 count=17 cells=  8 best= 35 sound=ok(search) T=34: INFEASIBLE 1.3s 
+2-medium case  86 R=4 count=10 cells= 14 best= 33 sound=ok T=32: INFEASIBLE 9.5s 
+2-medium case  87 R=4 count= 6 cells= 10 best= 14 sound=ok T=13: INFEASIBLE 0.3s 
+2-medium case  88 R=4 count= 4 cells=  7 best=  9 sound=ok T=8: INFEASIBLE 0.2s 
+2-medium case  89 R=3 count= 4 cells= 17 best= 12 sound=ok T=11: INFEASIBLE 0.4s 
+2-medium case  90 R=3 count=13 cells= 11 best= 39 sound=ok T=38: INFEASIBLE 4.1s 
+2-medium case  91 R=4 count=13 cells=  5 best= 27 sound=ok T=26: INFEASIBLE 0.7s 
+2-medium case  92 R=4 count= 6 cells=  4 best= 13 sound=ok T=12: INFEASIBLE 0.2s 
+2-medium case  93 R=3 count=17 cells=  7 best= 35 sound=ok T=34: INFEASIBLE 0.6s 
+2-medium case  94 R=4 count=14 cells=  5 best= 29 sound=ok(search) T=28: INFEASIBLE 0.7s 
+2-medium case  95 R=4 count=11 cells=  6 best= 23 sound=ok T=22: INFEASIBLE 0.6s 
+2-medium case  96 R=3 count= 3 cells= 14 best=  7 sound=ok T=6: INFEASIBLE 0.1s 
+2-medium case  97 R=3 count= 1 cells=  5 best=  2 sound=ok T=1: INFEASIBLE 0.0s 
+2-medium case  98 R=5 count=11 cells= 11 best= 34 sound=ok T=33: INFEASIBLE 5.7s 
+2-medium case  99 R=5 count= 7 cells= 11 best= 15 sound=ok T=14: INFEASIBLE 0.5s 
+2-medium case 100 R=3 count= 7 cells=  8 best= 15 sound=ok(search) T=14: INFEASIBLE 0.2s 
+2-medium case 101 R=5 count=14 cells=  6 best= 16 sound=ok T=15: INFEASIBLE 0.1s 
+2-medium case 102 R=5 count= 1 cells=  7 best=  4 sound=ok T=3: INFEASIBLE 0.1s 
+2-medium case 103 R=3 count=13 cells=  4 best= 15 sound=ok(search) T=14: INFEASIBLE 0.0s 
+2-medium case 104 R=3 count= 5 cells=  5 best= 10 sound=ok T=9: INFEASIBLE 0.1s 
+2-medium case 105 R=4 count= 7 cells= 14 best= 23 sound=ok T=22: INFEASIBLE 7.6s 
+2-medium case 106 R=3 count=15 cells=  8 best= 32 sound=ok T=31: INFEASIBLE 1.7s 
+2-medium case 107 R=4 count=16 cells= 19 best= 66 sound=ok T=65: UNKNOWN 60.2s 
+2-medium case 108 R=3 count=11 cells=  5 best= 23 sound=ok T=22: INFEASIBLE 0.3s 
+2-medium case 109 R=4 count= 3 cells= 12 best= 10 sound=ok T=9: INFEASIBLE 0.5s 
+2-medium case 110 R=5 count=13 cells= 11 best= 42 sound=ok T=41: INFEASIBLE 4.3s 
+2-medium case 111 R=4 count=13 cells= 10 best= 27 sound=ok T=26: INFEASIBLE 0.5s 
+2-medium case 112 R=3 count=10 cells=  9 best= 31 sound=ok T=30: INFEASIBLE 2.0s 
+2-medium case 113 R=3 count= 9 cells=  8 best= 19 sound=ok T=18: INFEASIBLE 0.5s 
+2-medium case 114 R=3 count=16 cells= 11 best= 33 sound=ok T=32: INFEASIBLE 0.8s 
+2-medium case 115 R=3 count=13 cells= 10 best= 39 sound=ok T=38: INFEASIBLE 3.5s 
+2-medium case 116 R=3 count= 3 cells=  7 best=  7 sound=ok T=6: INFEASIBLE 0.1s 
+2-medium case 117 R=5 count= 3 cells= 21 best= 13 sound=ok T=12: INFEASIBLE 4.8s 
+2-medium case 118 R=4 count= 7 cells=  6 best= 15 sound=ok T=14: INFEASIBLE 0.3s 
+2-medium case 119 R=4 count=17 cells= 28 best= 78 sound=ok T=77: UNKNOWN 60.3s 
+2-medium case 120 R=3 count=14 cells=  9 best= 29 sound=ok T=28: INFEASIBLE 0.6s 
+2-medium case 121 R=3 count=11 cells=  4 best= 12 sound=ok T=11: INFEASIBLE 0.0s 
+2-medium case 122 R=3 count=13 cells=  9 best= 27 sound=ok T=26: INFEASIBLE 0.4s 
+2-medium case 123 R=4 count=11 cells=  5 best= 24 sound=ok(search) T=23: INFEASIBLE 0.6s 
+2-medium case 124 R=5 count= 7 cells= 17 best= 37 sound=ok T=36: UNKNOWN 60.2s 
+2-medium case 125 R=5 count=17 cells= 17 best= 52 sound=ok T=51: INFEASIBLE 22.3s 
+2-medium case 126 R=4 count=13 cells= 11 best= 40 sound=ok T=39: INFEASIBLE 10.3s 
+2-medium case 127 R=5 count=10 cells=  5 best= 22 sound=ok T=21: INFEASIBLE 0.8s 
+2-medium case 128 R=4 count=17 cells= 16 best= 52 sound=ok T=51: INFEASIBLE 25.7s 
+2-medium case 129 R=3 count= 6 cells=  9 best= 13 sound=ok T=12: INFEASIBLE 0.4s 
+2-medium case 130 R=5 count=15 cells= 23 best= 77 sound=ok T=76: UNKNOWN 60.6s 
+2-medium case 131 R=4 count=17 cells= 10 best= 52 sound=ok T=51: INFEASIBLE 21.5s 
+2-medium case 132 R=5 count= 6 cells= 42 best= 50 sound=ok T=49: UNKNOWN 60.4s 
+2-medium case 133 R=4 count=10 cells= 18 best= 41 sound=ok T=40: UNKNOWN 60.3s 
+2-medium case 134 R=5 count=15 cells=  4 best= 31 sound=ok(search) T=30: INFEASIBLE 1.6s 
+2-medium case 135 R=3 count= 5 cells=  8 best= 11 sound=ok T=10: INFEASIBLE 0.4s 
+2-medium case 136 R=3 count= 7 cells= 10 best= 15 sound=ok T=14: INFEASIBLE 0.5s 
+2-medium case 137 R=5 count=11 cells=  8 best= 24 sound=ok T=23: INFEASIBLE 1.4s 
+2-medium case 138 R=4 count=15 cells= 19 best= 62 sound=ok T=61: UNKNOWN 60.4s 
+2-medium case 139 R=4 count=17 cells=  8 best= 35 sound=ok(search) T=34: INFEASIBLE 1.1s 
+2-medium case 140 R=4 count= 6 cells=  7 best= 14 sound=ok T=13: INFEASIBLE 1.2s 
+2-medium case 141 R=5 count=17 cells= 15 best= 53 sound=ok T=52: INFEASIBLE 32.0s 
+2-medium case 142 R=5 count=14 cells= 12 best= 44 sound=ok T=43: INFEASIBLE 19.5s 
+2-medium case 143 R=5 count=10 cells= 11 best= 31 sound=ok T=30: INFEASIBLE 6.6s 
+2-medium case 144 R=5 count=15 cells= 25 best= 76 sound=ok T=75: UNKNOWN 60.5s 
+2-medium case 145 R=3 count= 7 cells=  6 best= 15 sound=ok T=14: INFEASIBLE 0.5s 
+2-medium case 146 R=3 count=17 cells=  8 best= 36 sound=ok T=35: INFEASIBLE 2.8s 
+2-medium case 147 R=4 count=15 cells=  7 best= 31 sound=ok T=30: INFEASIBLE 3.3s 
+2-medium case 148 R=3 count= 5 cells=  6 best= 11 sound=ok T=10: INFEASIBLE 0.3s 
+2-medium case 149 R=4 count= 6 cells=  7 best= 13 sound=ok T=12: INFEASIBLE 0.4s 
+2-medium case 150 R=4 count= 1 cells=  7 best=  3 sound=ok T=2: INFEASIBLE 0.0s 
+2-medium case 151 R=3 count= 1 cells=  7 best=  3 sound=ok T=2: INFEASIBLE 0.0s 
+2-medium case 152 R=5 count= 7 cells= 18 best= 23 sound=ok T=22: INFEASIBLE 6.0s 
+2-medium case 153 R=4 count=19 cells= 15 best= 58 sound=ok T=57: UNKNOWN 60.3s 
+2-medium case 154 R=5 count=10 cells=  7 best= 21 sound=ok T=20: INFEASIBLE 0.7s 
+2-medium case 155 R=4 count= 4 cells= 14 best= 14 sound=ok T=13: INFEASIBLE 2.0s 
+2-medium case 156 R=3 count=19 cells=  8 best= 39 sound=ok(search) T=38: INFEASIBLE 2.2s 
+2-medium case 157 R=3 count= 9 cells=  7 best= 18 sound=ok T=17: INFEASIBLE 0.5s 
+2-medium case 158 R=5 count=15 cells= 28 best= 77 sound=ok T=76: UNKNOWN 60.7s 
+2-medium case 159 R=5 count=19 cells=  7 best= 39 sound=ok T=38: INFEASIBLE 2.6s 
+2-medium case 160 R=4 count=15 cells= 13 best= 31 sound=ok T=30: INFEASIBLE 2.4s 
+2-medium case 161 R=5 count= 7 cells= 59 best= 51 sound=ok T=50: UNKNOWN 60.5s 
+2-medium case 162 R=4 count=17 cells= 15 best= 53 sound=ok T=52: INFEASIBLE 20.0s 
+2-medium case 163 R=3 count= 2 cells= 15 best=  7 sound=ok T=6: INFEASIBLE 0.2s 
+2-medium case 164 R=3 count=10 cells=  6 best= 21 sound=ok(search) T=20: INFEASIBLE 0.4s 
+2-medium case 165 R=4 count=10 cells= 10 best= 31 sound=ok T=30: INFEASIBLE 10.1s 
+2-medium case 166 R=3 count= 8 cells=  7 best= 17 sound=ok T=16: INFEASIBLE 0.3s 
+2-medium case 167 R=5 count=17 cells= 49 best=122 sound=ok T=121: UNKNOWN 60.6s 
+2-medium case 168 R=3 count= 8 cells= 11 best= 17 sound=ok T=16: INFEASIBLE 0.5s 
+2-medium case 169 R=4 count= 1 cells=  9 best=  3 sound=ok T=2: INFEASIBLE 0.0s 
+2-medium case 170 R=4 count= 4 cells= 31 best= 20 sound=ok T=19: FEASIBLE 28.1s 19
+2-medium case 171 R=4 count= 9 cells= 22 best= 37 sound=ok T=36: INFEASIBLE 37.3s 
+2-medium case 172 R=4 count= 7 cells= 11 best= 23 sound=ok T=22: INFEASIBLE 13.1s 
+2-medium case 173 R=4 count=10 cells= 15 best= 31 sound=ok T=30: INFEASIBLE 4.4s 
+2-medium case 174 R=4 count= 6 cells=  7 best= 13 sound=ok T=12: INFEASIBLE 0.2s 
+2-medium case 175 R=5 count=15 cells=  8 best= 31 sound=ok T=30: INFEASIBLE 1.1s 
+2-medium case 176 R=5 count=15 cells=  9 best= 32 sound=ok T=31: INFEASIBLE 1.7s 
+2-medium case 177 R=4 count= 6 cells=  5 best= 14 sound=ok T=13: INFEASIBLE 0.6s 
+2-medium case 178 R=4 count=14 cells= 12 best= 43 sound=ok T=42: INFEASIBLE 9.0s 
+2-medium case 179 R=3 count= 7 cells= 11 best= 15 sound=ok T=14: INFEASIBLE 0.3s 
+2-medium case 180 R=4 count=12 cells= 29 best= 50 sound=ok T=49: UNKNOWN 60.2s 
+2-medium case 181 R=4 count=19 cells=  9 best= 58 sound=ok T=57: INFEASIBLE 26.9s 
+2-medium case 182 R=5 count= 4 cells= 19 best= 21 sound=ok T=20: UNKNOWN 60.1s 
+2-medium case 183 R=3 count=10 cells= 12 best= 31 sound=ok T=30: INFEASIBLE 3.6s 
+2-medium case 184 R=4 count= 4 cells= 26 best= 20 sound=ok T=19: UNKNOWN 60.2s 
+2-medium case 185 R=4 count= 7 cells= 10 best= 16 sound=ok T=15: INFEASIBLE 0.7s 
+2-medium case 186 R=5 count= 4 cells= 32 best= 27 sound=ok T=26: UNKNOWN 60.2s 
+2-medium case 187 R=5 count= 2 cells= 33 best= 12 sound=ok T=11: INFEASIBLE 22.8s 
+2-medium case 188 R=5 count=13 cells=  9 best= 27 sound=ok T=26: INFEASIBLE 0.9s 
+2-medium case 189 R=4 count= 3 cells= 10 best= 10 sound=ok T=9: INFEASIBLE 0.6s 
+2-medium case 190 R=5 count= 9 cells= 16 best= 33 sound=ok T=32: UNKNOWN 60.3s 
+2-medium case 191 R=5 count= 2 cells= 12 best=  7 sound=ok T=6: INFEASIBLE 0.3s 
+2-medium case 192 R=5 count= 6 cells= 23 best= 26 sound=ok T=25: UNKNOWN 60.2s 
+2-medium case 193 R=4 count=17 cells=  4 best= 19 sound=ok(search) T=18: INFEASIBLE 0.1s 
+2-medium case 194 R=5 count=13 cells=  5 best= 28 sound=ok T=27: INFEASIBLE 1.3s 
+2-medium case 195 R=4 count=12 cells=  4 best= 24 sound=ok T=23: INFEASIBLE 0.6s 
+2-medium case 196 R=3 count= 8 cells=  6 best= 17 sound=ok(search) T=16: INFEASIBLE 0.4s 
+2-medium case 197 R=5 count= 8 cells= 51 best= 65 sound=ok T=64: UNKNOWN 60.3s 
+2-medium case 198 R=3 count= 8 cells= 19 best= 24 sound=ok T=23: INFEASIBLE 2.1s 
+2-medium case 199 R=5 count= 3 cells= 17 best= 10 sound=ok T=9: INFEASIBLE 1.2s 
+2-medium case 200 R=5 count= 4 cells= 13 best= 13 sound=ok T=12: INFEASIBLE 2.2s 
+2-medium case 201 R=3 count= 1 cells= 11 best=  3 sound=ok T=2: INFEASIBLE 0.0s 
+2-medium case 202 R=4 count= 7 cells=  6 best= 15 sound=ok T=14: INFEASIBLE 0.5s 
+2-medium case 203 R=5 count=16 cells= 17 best= 66 sound=ok T=65: UNKNOWN 60.5s 
+2-medium case 204 R=3 count= 2 cells=  6 best=  5 sound=ok T=4: INFEASIBLE 0.2s 
+2-medium case 205 R=4 count=10 cells=  6 best= 22 sound=ok T=21: INFEASIBLE 0.7s 
+2-medium case 206 R=3 count= 4 cells=  8 best=  9 sound=ok T=8: INFEASIBLE 0.3s 
+2-medium case 207 R=5 count=15 cells= 22 best= 61 sound=ok T=60: UNKNOWN 60.4s 
+2-medium case 208 R=3 count= 9 cells=  5 best= 19 sound=ok T=18: INFEASIBLE 0.3s 
+2-medium case 209 R=3 count= 4 cells=  7 best=  8 sound=ok T=7: INFEASIBLE 0.1s 

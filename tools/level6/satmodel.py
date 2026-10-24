@@ -15,9 +15,14 @@ INFEASIBLE at T proves "every program needs >= T+1 lines" for that question.
 from ortools.sat.python import cp_model
 
 
-def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=None):
-    """Returns (status_name, states) where states = [(q[6], on[6]) for t in 1..T] when feasible.
-    `extra(m, V)` may add constraints (V = dict of variables) -- used for decompositions."""
+def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=None, symbreak=True,
+          start_cfg=None):
+    """Returns (status_name, states) where states = [(q[6], on[6]) for t in 0..T] when feasible.
+    `extra(m, V)` may add constraints (V = dict of variables) -- used for decompositions.
+    start_cfg = (q[6], on[6]) fixes the configuration at t=0 (pattern + halo empty), e.g. the
+    configuration of a known program right after one of its detections."""
+    if start_cfg is not None:
+        free_start, symbreak = True, False      # fixed but arbitrary start: twins no longer symmetric
     m = cp_model.CpModel()
     nq = lg.nq
     U = lg.S + lg.K
@@ -28,7 +33,10 @@ def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=Non
     for e in range(6):
         for t in range(T + 1):
             m.AddExactlyOne(pos[e][t])
-        if not free_start:
+        if start_cfg is not None:
+            m.Add(pos[e][0][start_cfg[0][e]] == 1)
+            m.Add(on[e][0] == int(start_cfg[1][e]))
+        elif not free_start:
             m.Add(pos[e][0][lg.start_q] == 1)
             m.Add(on[e][0] == 0)
         for t in range(1, T + 1):
@@ -40,11 +48,27 @@ def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=Non
             for q in range(nq):
                 m.AddBoolOr([P0[j] for j in (q - 1, q, q + 1) if 0 <= j < nq]).OnlyEnforceIf(P1[q])
                 m.Add(P1[q] == P0[q]).OnlyEnforceIf(tog)
-    if free_start:   # e and e+3 are interchangeable: order their start positions
+    if symbreak:
+        # Emitters e and e+3 are interchangeable (same axis, same line numbering, same start), so
+        # swapping their whole trajectories maps solutions to solutions: keep only the solutions
+        # where the trajectory of e is lexicographically <= that of e+3 (value 2q+on per tick).
         for a in range(3):
-            qa = sum(q * pos[a][0][q] for q in range(nq))
-            qb = sum(q * pos[a + 3][0][q] for q in range(nq))
-            m.Add(qa <= qb)
+            eq = None
+            for t in range(0 if free_start else 1, T + 1):
+                va = sum(2 * q * pos[a][t][q] for q in range(nq)) + on[a][t]
+                vb = sum(2 * q * pos[a + 3][t][q] for q in range(nq)) + on[a + 3][t]
+                same = m.NewBoolVar('')
+                m.Add(va == vb).OnlyEnforceIf(same)
+                m.Add(va != vb).OnlyEnforceIf(same.Not())
+                if eq is None:
+                    m.Add(va <= vb)
+                    eq = same
+                else:
+                    m.Add(va <= vb).OnlyEnforceIf(eq)
+                    nxt = m.NewBoolVar('')
+                    m.AddBoolAnd([eq, same]).OnlyEnforceIf(nxt)
+                    m.AddBoolOr([eq.Not(), same.Not()]).OnlyEnforceIf(nxt.Not())
+                    eq = nxt
     # c[a][t][l] = number of active emitters of axis a aiming at line l
     c = [[{} for t in range(T + 1)] for a in range(3)]
     for t in range(1, T + 1):
