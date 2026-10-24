@@ -1209,8 +1209,15 @@ mod opt {
     use super::{Action, Case, count_accepted, seeds, unpack};
     use std::sync::{Condvar, Mutex};
 
-    /// Beam widths by attempt number (the last one repeats).
-    const WIDTHS: [usize; 4] = [800, 1500, 3000, 6000];
+    /// Beam widths by attempt number; afterwards the last two alternate. Wider beams keep
+    /// finding shorter programs (from scratch, every 20th case: 1587 / 1549 / 1530 lines at
+    /// widths 800 / 3000 / 12000), and the alternation keeps restarts frequent.
+    const WIDTHS: [usize; 5] = [800, 1500, 3000, 6000, 12000];
+
+    fn width(attempt: u64) -> usize {
+        let n = attempt as usize;
+        WIDTHS[if n < WIDTHS.len() { n } else { WIDTHS.len() - 2 + (n - WIDTHS.len()) % 2 }]
+    }
     /// Fractions of the incumbent kept as a fixed prefix (one is drawn per attempt).
     const PREFIX: [f64; 7] = [0.0, 0.0, 0.25, 0.4, 0.55, 0.7, 0.85];
 
@@ -1277,7 +1284,7 @@ mod opt {
                 Some(best) => {
                     let s = if n == 0 { 0 } else { draw(12) };
                     let npre = (best.len() as f64 * PREFIX[draw(PREFIX.len())]) as usize;
-                    (s, best[..npre].to_vec(), best.len() - 1 - npre, WIDTHS[(n as usize).min(WIDTHS.len() - 1)], true)
+                    (s, best[..npre].to_vec(), best.len() - 1 - npre, width(n), true)
                 }
             };
             if max_ticks == 0 {
@@ -1570,8 +1577,26 @@ mod tests {
             }
         }
         let t0 = std::time::Instant::now();
+        // Parameter overrides, e.g. L6_QUAL_PRM="hp=40,wd=10".
+        let mut base = beam::Params { width, ..Default::default() };
+        for kv in std::env::var("L6_QUAL_PRM").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
+            let (k, v) = kv.split_once('=').unwrap();
+            let v: i64 = v.parse().unwrap();
+            match k {
+                "kcap" => base.kcap = v as usize,
+                "pool" => base.pool = v as usize,
+                "wa" => base.wa = v,
+                "wd" => base.wd = v,
+                "hp" => base.hp = v,
+                "tn" => base.tn = v as u32,
+                "nz" => base.nz = v as u32,
+                "tail" => base.tail_pct = v as usize,
+                "h2" => base.h2 = v,
+                _ => panic!("unknown parameter {k}"),
+            }
+        }
         let res = harness::par::map_threads(8, &items, |(_, _, count, geo, seed)| {
-            let prm = beam::Params { width, ..Default::default() };
+            let prm = base.clone();
             let t = std::time::Instant::now();
             let (prog, st) = beam::search(geo, &State::start(geo), *count, 999, &prm, *seed, &|| false);
             (prog.map_or(999, |p| p.len()), t.elapsed().as_secs_f64(), st.nominal)
@@ -1586,7 +1611,8 @@ mod tests {
         let secs: f64 = res.iter().map(|r| r.1).sum();
         let nominal: u64 = res.iter().map(|r| r.2).sum();
         println!(
-            "TOTAL W={width}: {lines} lines, {secs:.1} cpu-s ({:.1} s wall), {:.0} M nominal children/cpu-s",
+            "TOTAL W={width} {:?}: {lines} lines, {secs:.1} cpu-s ({:.1} s wall), {:.0} M nominal children/cpu-s",
+            std::env::var("L6_QUAL_PRM").unwrap_or_default(),
             t0.elapsed().as_secs_f64(),
             nominal as f64 / secs / 1e6
         );
