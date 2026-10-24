@@ -1,5 +1,40 @@
-use crate::model::{count_accepted, empty_board, parse_instr, Board, Pattern, Rig};
-use std::collections::VecDeque;
+//! Level 6 "Nanofabricator": the shortest emitter program that prints a pattern `count` times.
+//!
+//! # Rules (exact semantics live in `model.rs`, verified against the website)
+//!
+//! A hex board of radius `R` has a ring of `6R` border positions. Emitter `k` (0..6) starts at
+//! ring index `k*R`, switched off, and always fires in its own direction (→ ↘ ↙ ← ↖ ↗). A program
+//! is a list of lines, one instruction per emitter: `-` nothing, `T` toggle, `F`/`B` one step
+//! clockwise / counter-clockwise. Each line is one tick: apply the instructions, then every active
+//! emitter fires; a cell hit by exactly two beams becomes matter, by three or more loses it. After
+//! the tick, if every pattern cell is matter and no *halo* cell (a non-pattern cell next to the
+//! pattern) is, a copy is detected and the pattern cells are cleared. The cost is the number of
+//! lines until `count` copies were detected.
+//!
+//! Only pattern ∪ halo cells ever matter (at most a few hundred), so the whole board state is a
+//! small bitset plus the six emitters ([`sim::State`]).
+//!
+//! # Structure
+//!
+//! - [`geo`]: relevant cells as bit indices, beam masks per emitter and ring position.
+//! - [`sim`]: the exact bitset simulator (tested against `model.rs`).
+//! - [`sym`]: the 12 board symmetries and how programs map between symmetric boards.
+//! - [`beam`]: one beam-search attempt, the hot loop.
+//! - [`seeds`]: loading known programs (by default `work/level6/best/`) as incumbents.
+//! - [`opt`]: the optimiser: runs attempts over all cases on a bounded number of threads and
+//!   keeps the shortest valid program per case.
+//!
+//! Environment: `L6_SEED_DIR` (seed outputs, empty = none), `L6_SEED` (random seed, default 0),
+//! `L6_ROUNDS` (improvement attempts per case; default unlimited with `--budget`, else none).
+//! Threads: `CCC_THREADS`, shared by all input files of one `cargo ccc all` run.
+//!
+//! Credits: the search follows team leddis088's `beam5.c` and its driver `cloud_beam.py`
+//! (`work/level6/third_party/leddis088/`): the scoring (copies, painted cells, emitter distance,
+//! halo junk), the per-parent child cap, the tail rerank, and restarting from a prefix of the
+//! incumbent on a random symmetric copy of the board. This is an independent Rust rewrite; the
+//! expansion groups emitter options by their beam so each beam combination is evaluated once.
+
+use crate::model::{Pattern, count_accepted, parse_instr};
 
 struct Case {
     pattern: Pattern,
@@ -14,7 +49,7 @@ fn parse(input: &str) -> Vec<Case> {
             let h = harness::parse::ints(lines.next().unwrap());
             let (r, rows, count) = (h[0] as usize, h[1] as usize, h[3] as usize);
             let grid = (0..rows).map(|_| lines.next().unwrap().trim().as_bytes().to_vec()).collect();
-            Case { pattern: Pattern::new(Board { r, grid }), count }
+            Case { pattern: Pattern::new(crate::model::Board { r, grid }), count }
         })
         .collect()
 }
@@ -73,989 +108,1204 @@ pub fn score(input: &str, output: &[String]) -> Result<Vec<i64>, String> {
     Ok(costs)
 }
 
-const NONE: u32 = u32::MAX;
-
-/// Static geometry of a board: ring, cell classes, and every emitter's beam per ring position.
-struct Geo {
-    n: usize,
-    cols: usize,
-    /// 0 = free (far from the pattern), 1 = pattern, 2 = skirting.
-    class: Vec<u8>,
-    /// beams[e][p] = flat cell indices hit by emitter `e` at ring position `p`.
-    beams: Vec<Vec<Vec<u32>>>,
-    start: [usize; 6],
-}
-
-impl Geo {
-    fn new(pat: &Pattern) -> Geo {
-        let r = pat.board.r;
-        let b = empty_board(r);
-        let rig = Rig::new(r);
-        let cols = b.cols();
-        let mut class = vec![0u8; b.rows() * cols];
-        for &(y, x) in &pat.cells {
-            class[y * cols + x] = 1;
-        }
-        for &(y, x) in &pat.skirting {
-            class[y * cols + x] = 2;
-        }
-        let beams = (0..6)
-            .map(|e| {
-                rig.ring
-                    .iter()
-                    .map(|&(y, x)| {
-                        b.beam_cells(y, x, e as u8 + 1)
-                            .into_iter()
-                            .map(|(cy, cx)| (cy * cols + cx) as u32)
-                            .collect()
-                    })
-                    .collect()
-            })
-            .collect();
-        Geo { n: rig.ring.len(), cols, class, beams, start: rig.pos }
-    }
-}
-
-const ACTIONS: [u8; 4] = [b'-', b'F', b'B', b'T'];
-
-fn step_pos(n: usize, p: usize, a: u8) -> usize {
-    match a {
-        b'F' => (p + 1) % n,
-        b'B' => (p + n - 1) % n,
-        _ => p,
-    }
-}
-
-/// Baseline: two emitters of different families as a "pen" whose beam intersection walks over
-/// the pattern, never marking a skirting cell.
-fn pen(geo: &Geo, ea: usize, eb: usize, count: usize) -> Option<Vec<[u8; 6]>> {
-    let n = geo.n;
-    let mut inter = vec![NONE; n * n];
-    for pa in 0..n {
-        for pb in 0..n {
-            let a = &geo.beams[ea][pa];
-            if let Some(&c) = a.iter().find(|c| geo.beams[eb][pb].contains(c)) {
-                inter[pa * n + pb] = c;
-            }
-        }
-    }
-    let total = geo.class.iter().filter(|&&c| c == 1).count();
-    let enc = |pa: usize, pb: usize, aa: bool, ab: bool| ((pa * n + pb) * 2 + aa as usize) * 2 + ab as usize;
-    let mark = |s: usize| -> u32 {
-        let (ab, aa, pab) = (s & 1 == 1, (s >> 1) & 1 == 1, s >> 2);
-        if aa && ab {
-            inter[pab]
-        } else {
-            NONE
-        }
-    };
-    let mut marked = vec![false; geo.class.len()];
-    let mut done = 0;
-    let mut copies = 0;
-    let mut cur = enc(geo.start[ea], geo.start[eb], false, false);
-    let mut prog: Vec<[u8; 6]> = Vec::new();
-    let ns = n * n * 4;
-    let mut prev = vec![(usize::MAX, 0u8, 0u8); ns];
-    let mut seen = vec![0u32; ns];
-    let mut stamp = 0u32;
-    while copies < count {
-        // BFS to the nearest state that marks an unmarked pattern cell.
-        stamp += 1;
-        let mut q = VecDeque::new();
-        seen[cur] = stamp;
-        q.push_back(cur);
-        let mut goal = None;
-        'bfs: while let Some(s) = q.pop_front() {
-            let (ab, aa, pab) = (s & 1 == 1, (s >> 1) & 1 == 1, s >> 2);
-            let (pa, pb) = (pab / n, pab % n);
-            for &xa in &ACTIONS {
-                for &xb in &ACTIONS {
-                    let t = enc(
-                        step_pos(n, pa, xa),
-                        step_pos(n, pb, xb),
-                        aa ^ (xa == b'T'),
-                        ab ^ (xb == b'T'),
-                    );
-                    if seen[t] == stamp {
-                        continue;
-                    }
-                    let m = mark(t);
-                    if m != NONE && geo.class[m as usize] == 2 {
-                        continue;
-                    }
-                    seen[t] = stamp;
-                    prev[t] = (s, xa, xb);
-                    if m != NONE && geo.class[m as usize] == 1 && !marked[m as usize] {
-                        goal = Some(t);
-                        break 'bfs;
-                    }
-                    q.push_back(t);
-                }
-            }
-        }
-        let goal = goal?;
-        let mut path = Vec::new();
-        let mut s = goal;
-        while s != cur {
-            let (p, xa, xb) = prev[s];
-            path.push((s, xa, xb));
-            s = p;
-        }
-        for &(s, xa, xb) in path.iter().rev() {
-            let mut line = [b'-'; 6];
-            line[ea] = xa;
-            line[eb] = xb;
-            prog.push(line);
-            let m = mark(s);
-            if m != NONE && geo.class[m as usize] == 1 && !marked[m as usize] {
-                marked[m as usize] = true;
-                done += 1;
-                if done == total {
-                    copies += 1;
-                    done = 0;
-                    marked.iter_mut().for_each(|x| *x = false);
-                }
-            }
-        }
-        cur = goal;
-    }
-    let _ = geo.cols;
-    Some(prog)
-}
-
-fn solve_case(c: &Case) -> Vec<[u8; 6]> {
-    let geo = Geo::new(&c.pattern);
-    let mut best: Option<Vec<[u8; 6]>> = None;
-    let t0 = std::time::Instant::now();
-    for f in 0..3 {
-        let sw = Sweep::new(&geo, &c.pattern, f);
-        for from_max in [false, true] {
-            if let Some(p) = sw.search(c.count, from_max, beam_width()) {
-                if best.as_ref().map_or(true, |b| p.len() < b.len()) {
-                    best = Some(p);
-                }
-            }
-        }
-    }
-    let sweep_len = best.as_ref().map_or(0, |b| b.len());
-    let t1 = t0.elapsed().as_secs_f64();
-    let pen_best = best_pen(&geo, c.count);
-    harness::trace!("r={} m={} K={} sweep={} ({:.1}s) pen={}", c.pattern.board.r, c.pattern.cells.len(), c.count, sweep_len, t1, pen_best.len());
-    if best.as_ref().map_or(true, |b| pen_best.len() < b.len()) {
-        best = Some(pen_best);
-    }
-    best.unwrap()
-}
-
-fn best_pen(geo: &Geo, count: usize) -> Vec<[u8; 6]> {
-    let mut best: Option<Vec<[u8; 6]>> = None;
-    for ea in 0..6 {
-        for eb in ea + 1..6 {
-            if ea % 3 == eb % 3 {
-                continue;
-            }
-            if let Some(p) = pen(geo, ea, eb, count) {
-                if best.as_ref().map_or(true, |b| p.len() < b.len()) {
-                    best = Some(p);
-                }
-            }
-        }
-    }
-    best.expect("no pen pair works")
-}
-
 pub fn solve(input: &str) -> Vec<String> {
     let cases = parse(input);
-    let prm = zip_beam::Params::from_env();
-    let done = std::sync::atomic::AtomicUsize::new(0);
-    let t0 = std::time::Instant::now();
-    let progs = harness::par::map(&cases, |c| {
-        let prog = zip_beam::solve_case(c, &prm).filter(|p| count_accepted(&c.pattern, p) >= c.count);
-        let prog = prog.unwrap_or_else(|| solve_case(c));
-        let k = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        harness::trace!(
-            "progress n={} {k}/{} r={} cells={} count={} -> {} lines ({:.0}s)",
-            cases.len(), cases.len(), c.pattern.board.r, c.pattern.cells.len(), c.count, prog.len(),
-            t0.elapsed().as_secs_f64()
-        );
-        prog
-    });
+    let progs = opt::optimize(&cases);
     let mut out = Vec::new();
-    for p in progs {
-        for line in p {
-            let toks: Vec<String> = line.iter().map(|&c| (c as char).to_string()).collect();
-            out.push(toks.join(" "));
-        }
+    for (case, prog) in cases.iter().zip(&progs) {
+        let lines: Vec<[u8; 6]> = prog.iter().map(|&a| unpack(a)).collect();
+        assert!(count_accepted(&case.pattern, &lines) >= case.count, "solver produced an invalid program");
+        out.extend(lines.iter().map(|l| l.iter().map(|&c| (c as char).to_string()).collect::<Vec<_>>().join(" ")));
         out.push(String::new());
     }
     out
 }
 
-fn beam_width() -> usize {
-    std::env::var("L6_W").ok().and_then(|v| v.parse().ok()).unwrap_or(60)
+/// One instruction line packed into 12 bits: 2 bits per emitter, emitter `k` at bits `2k..2k+2`.
+type Action = u16;
+/// Instruction codes inside an [`Action`].
+const NOP: u16 = 0;
+const FWD: u16 = 1;
+const BWD: u16 = 2;
+const TOGGLE: u16 = 3;
+const SYMBOLS: [u8; 4] = *b"-FBT";
+
+/// Instruction code of emitter `k` in `a`.
+fn op(a: Action, k: usize) -> u16 {
+    (a >> (2 * k)) & 3
 }
 
-/// Line key of grid cell `(y, x)` in family `f` (0 rows, 1 SE diagonals, 2 SW diagonals);
-/// adjacent lines differ by 1.
-fn line_key(r: usize, f: usize, y: usize, x: usize) -> i32 {
-    let (y, x, r) = (y as i32, x as i32, r as i32);
-    match f {
-        0 => y,
-        1 => (x - y - r) / 2,
-        _ => (x + y - r) / 2,
+fn pack(line: &[u8; 6]) -> Action {
+    (0..6).fold(0, |a, k| a | (SYMBOLS.iter().position(|&s| s == line[k]).unwrap() as u16) << (2 * k))
+}
+
+fn unpack(a: Action) -> [u8; 6] {
+    std::array::from_fn(|k| SYMBOLS[op(a, k) as usize])
+}
+
+/// Board geometry restricted to the cells that matter.
+mod geo {
+    use crate::model::{Pattern, Rig};
+    use std::collections::BTreeMap;
+
+    /// Bitset words. 8 words = 512 relevant cells; the inputs need at most 6.
+    pub const MAXW: usize = 8;
+    pub type Bits = [u64; MAXW];
+    /// Beam id of a beam that hits no relevant cell (the same as no beam at all).
+    pub const EMPTY: u16 = u16::MAX;
+
+    /// Relevant cells are numbered pattern cells first (`0..npat`), then halo cells.
+    pub struct Geo {
+        pub r: usize,
+        /// Ring length `6r`.
+        pub ring: usize,
+        /// Bitset words in use.
+        pub nw: usize,
+        pub npat: usize,
+        pub pat: Bits,
+        pub halo: Bits,
+        /// `beam[k * ring + p]`: relevant cells hit by emitter `k` from ring position `p`.
+        pub beam: Vec<Bits>,
+        /// Equal ids for equal beam masks of the same emitter ([`EMPTY`] if it hits nothing).
+        pub beam_id: Vec<u16>,
+        /// `line[j * 6 + k]`: window offset (see [`Geo::window_start`]) at which emitter `k`'s
+        /// beam crosses pattern cell `j`.
+        pub line: Vec<u8>,
+    }
+
+    impl Geo {
+        pub fn new(pattern: &Pattern) -> Geo {
+            let r = pattern.board.r;
+            let rig = Rig::new(r);
+            let ring = rig.ring.len();
+            let index: BTreeMap<(usize, usize), usize> =
+                pattern.cells.iter().chain(&pattern.skirting).enumerate().map(|(i, &c)| (c, i)).collect();
+            let nrel = index.len();
+            assert!(nrel <= MAXW * 64, "{nrel} relevant cells do not fit the bitsets");
+            let npat = pattern.cells.len();
+            let mut pat = [0; MAXW];
+            let mut halo = [0; MAXW];
+            for i in 0..nrel {
+                let m = if i < npat { &mut pat } else { &mut halo };
+                m[i / 64] |= 1 << (i % 64);
+            }
+            let mut beam = vec![[0u64; MAXW]; 6 * ring];
+            for k in 0..6 {
+                for (p, &(y, x)) in rig.ring.iter().enumerate() {
+                    for cell in pattern.board.beam_cells(y, x, k as u8 + 1) {
+                        if let Some(&i) = index.get(&cell) {
+                            beam[k * ring + p][i / 64] |= 1 << (i % 64);
+                        }
+                    }
+                }
+            }
+            let beam_id = (0..6 * ring)
+                .map(|kp| {
+                    let (k, p) = (kp / ring, kp % ring);
+                    if beam[kp] == [0; MAXW] {
+                        EMPTY
+                    } else {
+                        (0..=p).find(|&q| beam[k * ring + q] == beam[kp]).unwrap() as u16
+                    }
+                })
+                .collect();
+            let mut geo = Geo { r, ring, nw: nrel.div_ceil(64).max(1), npat, pat, halo, beam, beam_id, line: Vec::new() };
+            geo.line = (0..npat * 6)
+                .map(|jk| {
+                    let (j, k) = (jk / 6, jk % 6);
+                    (0..=2 * r)
+                        .find(|&o| geo.beam(k, geo.pos_at(k, o))[j / 64] >> (j % 64) & 1 == 1)
+                        .expect("every cell lies on one line per direction") as u8
+                })
+                .collect();
+            geo
+        }
+
+        pub fn beam(&self, k: usize, p: usize) -> &Bits {
+            &self.beam[k * self.ring + p]
+        }
+
+        /// Emitter `k` only ever needs the `2r+1` ring positions centred on its start: elsewhere
+        /// its beam runs along the border or off the board. This is the first of them.
+        pub fn window_start(&self, k: usize) -> usize {
+            (k * self.r + self.ring - self.r) % self.ring
+        }
+
+        /// Offset of ring position `p` in emitter `k`'s window (`> 2r` means outside).
+        pub fn offset(&self, k: usize, p: usize) -> usize {
+            (p + self.ring - self.window_start(k)) % self.ring
+        }
+
+        /// Ring position at window offset `o` of emitter `k`.
+        pub fn pos_at(&self, k: usize, o: usize) -> usize {
+            (self.window_start(k) + o) % self.ring
+        }
     }
 }
 
-const NOLINE: i32 = i32::MIN;
-const WORDS: usize = 8;
+/// Exact simulation on the relevant-cell bitsets.
+mod sim {
+    use super::geo::{Bits, Geo, MAXW};
+    use super::{Action, BWD, FWD, TOGGLE, op};
 
-/// Line sweep: emitters `f` and `f+3` sit on the same line of family `f`, so the whole line gets
-/// two hits and becomes matter; the other four emitters ("killers") put a third beam on the
-/// skirting cells of that line. A beam search plans all moves with the exact matter rules.
-struct Sweep {
-    n: usize,
-    np: usize,
-    nrel: usize,
-    /// rbeam[e][p] = relevant (pattern or skirting) cells, compact indices, on that beam.
-    rbeam: Vec<Vec<Vec<u16>>>,
-    /// Line key (family `f`) of each relevant cell.
-    key: Vec<i32>,
-    /// For the two D emitters: line key per ring position.
-    dline: [Vec<i32>; 2],
-    dpos: [std::collections::BTreeMap<i32, usize>; 2],
-    de: [usize; 2],
-    lmin: i32,
-    lmax: i32,
-    start: [usize; 6],
-    /// distc[e][p * np + c] = ring steps for emitter `e` from `p` until its beam covers pattern cell `c`.
-    distc: Vec<Vec<u8>>,
-}
+    /// Everything that determines the future: matter on relevant cells, the emitters, copies.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct State {
+        pub m: Bits,
+        /// Ring position per emitter.
+        pub pos: [u8; 6],
+        /// Bit `k` set = emitter `k` is on.
+        pub act: u8,
+        /// Copies detected so far.
+        pub subs: u8,
+    }
 
-#[derive(Clone)]
-struct Node {
-    pos: [u8; 6],
-    act: u8,
-    bits: [u64; WORDS],
-    made: u16,
-    copies: u16,
-    parent: u32,
-    line: [u8; 6],
-}
+    impl State {
+        pub fn start(geo: &Geo) -> State {
+            State { m: [0; MAXW], pos: std::array::from_fn(|k| (k * geo.r) as u8), act: 0, subs: 0 }
+        }
+    }
 
-fn ring_dist(n: usize, a: usize, b: usize) -> usize {
-    let d = (a + n - b) % n;
-    d.min(n - d)
-}
+    /// New ring position after instruction `code` (wrapping around the ring).
+    pub fn moved(geo: &Geo, p: usize, code: u16) -> usize {
+        match code {
+            FWD => (p + 1) % geo.ring,
+            BWD => (p + geo.ring - 1) % geo.ring,
+            _ => p,
+        }
+    }
 
-impl Sweep {
-    fn new(geo: &Geo, pat: &Pattern, f: usize) -> Sweep {
-        let r = pat.board.r;
-        let cols = geo.cols;
-        let mut compact = vec![u16::MAX; geo.class.len()];
-        let mut key = Vec::new();
-        let mut np = 0;
-        for cls in [1u8, 2] {
-            for (i, &c) in geo.class.iter().enumerate() {
-                if c == cls {
-                    compact[i] = key.len() as u16;
-                    key.push(line_key(r, f, i / cols, i % cols));
-                    if cls == 1 {
-                        np += 1;
-                    }
+    /// One tick: instructions, beams, matter rules, copy detection. `NW` = bitset words in use.
+    #[inline]
+    pub fn step<const NW: usize>(geo: &Geo, s: &State, a: Action) -> State {
+        let mut t = *s;
+        let (mut c1, mut c2, mut c3) = ([0u64; NW], [0u64; NW], [0u64; NW]);
+        for k in 0..6 {
+            let code = op(a, k);
+            t.pos[k] = moved(geo, t.pos[k] as usize, code) as u8;
+            if code == TOGGLE {
+                t.act ^= 1 << k;
+            }
+            if t.act >> k & 1 == 1 {
+                let b = geo.beam(k, t.pos[k] as usize);
+                for w in 0..NW {
+                    c3[w] |= c2[w] & b[w];
+                    c2[w] |= c1[w] & b[w];
+                    c1[w] |= b[w];
                 }
             }
         }
-        assert!(np <= WORDS * 64);
-        let rbeam: Vec<Vec<Vec<u16>>> = geo
-            .beams
-            .iter()
-            .map(|pe| {
-                pe.iter()
-                    .map(|cells| cells.iter().map(|&c| compact[c as usize]).filter(|&c| c != u16::MAX).collect())
-                    .collect()
-            })
-            .collect();
-        let de = [f, f + 3];
-        let dline: [Vec<i32>; 2] = std::array::from_fn(|i| {
-            geo.beams[de[i]]
-                .iter()
-                .map(|cells| match cells.first() {
-                    Some(&c) => line_key(r, f, c as usize / cols, c as usize % cols),
-                    None => NOLINE,
-                })
-                .collect()
-        });
-        let dpos = std::array::from_fn(|i| {
-            let mut m = std::collections::BTreeMap::new();
-            for (p, &l) in dline[i].iter().enumerate() {
-                if l != NOLINE {
-                    m.insert(l, p);
-                }
+        let mut full = true;
+        for w in 0..NW {
+            t.m[w] = (t.m[w] | c2[w]) & !c3[w];
+            full &= t.m[w] & geo.pat[w] == geo.pat[w] && t.m[w] & geo.halo[w] == 0;
+        }
+        if full {
+            t.subs = t.subs.saturating_add(1);
+            for w in 0..NW {
+                t.m[w] &= !geo.pat[w];
             }
-            m
-        });
-        let lmin = key[..np].iter().copied().min().unwrap();
-        let lmax = key[..np].iter().copied().max().unwrap();
-        let n = geo.n;
-        let distc = (0..6)
-            .map(|e| {
-                let mut d = vec![u8::MAX; n * np];
-                for (q, cells) in rbeam[e].iter().enumerate() {
-                    for &c in cells {
-                        let c = c as usize;
-                        if c >= np {
-                            continue;
-                        }
-                        for p in 0..n {
-                            let v = ring_dist(n, p, q) as u8;
-                            if v < d[p * np + c] {
-                                d[p * np + c] = v;
-                            }
-                        }
-                    }
-                }
-                d
-            })
-            .collect();
-        Sweep { n, np, nrel: key.len(), rbeam, key, dline, dpos, de, lmin, lmax, start: geo.start, distc }
+        }
+        t
     }
 
-    fn is_d(&self, e: usize) -> bool {
-        e == self.de[0] || e == self.de[1]
+    /// [`step`] for any word count.
+    pub fn step_any(geo: &Geo, s: &State, a: Action) -> State {
+        match geo.nw {
+            1 => step::<1>(geo, s, a),
+            2 => step::<2>(geo, s, a),
+            3 => step::<3>(geo, s, a),
+            4 => step::<4>(geo, s, a),
+            5 => step::<5>(geo, s, a),
+            6 => step::<6>(geo, s, a),
+            7 => step::<7>(geo, s, a),
+            _ => step::<8>(geo, s, a),
+        }
     }
 
-    /// D line if both D emitters are active on the same line.
-    fn d_line(&self, pos: &[u8; 6], act: u8) -> Option<i32> {
-        let [a, b] = self.de;
-        if act >> a & 1 == 1 && act >> b & 1 == 1 {
-            let la = self.dline[0][pos[a] as usize];
-            if la != NOLINE && la == self.dline[1][pos[b] as usize] {
-                return Some(la);
+    pub fn run(geo: &Geo, start: &State, prog: &[Action]) -> State {
+        prog.iter().fold(*start, |s, &a| step_any(geo, &s, a))
+    }
+
+    /// Number of lines after which `prog` has detected `count` copies (`None` if it never does).
+    pub fn finish_len(geo: &Geo, prog: &[Action], count: usize) -> Option<usize> {
+        let mut s = State::start(geo);
+        for (i, &a) in prog.iter().enumerate() {
+            s = step_any(geo, &s, a);
+            if s.subs as usize >= count {
+                return Some(i + 1);
             }
         }
         None
     }
+}
 
-    /// Applies one tick's beams to `bits`. None if a skirting cell would get matter.
-    fn apply(&self, pos: &[u8; 6], act: u8, bits: &mut [u64; WORDS], cnt: &mut [u8], touched: &mut Vec<u16>) -> bool {
-        touched.clear();
-        for e in 0..6 {
-            if act >> e & 1 == 1 {
-                for &c in &self.rbeam[e][pos[e] as usize] {
-                    if cnt[c as usize] == 0 {
-                        touched.push(c);
-                    }
-                    cnt[c as usize] += 1;
-                }
-            }
-        }
-        let mut ok = true;
-        for &c in touched.iter() {
-            let k = cnt[c as usize];
-            cnt[c as usize] = 0;
-            let c = c as usize;
-            if c >= self.np {
-                if k == 2 {
-                    ok = false;
-                }
-            } else if k == 2 {
-                bits[c / 64] |= 1 << (c % 64);
-            } else if k >= 3 {
-                bits[c / 64] &= !(1 << (c % 64));
-            }
-        }
-        ok
+/// The 12 symmetries of the hex board, and programs mapped between symmetric boards.
+mod sym {
+    use super::{Action, BWD, FWD, op};
+    use crate::model::{Board, Pattern};
+
+    /// Mirror (row `y` -> `2R - y`) first, then `rot` rotations by 60° clockwise.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Sym {
+        pub mirror: bool,
+        pub rot: u8,
     }
 
-    /// Ranking penalty: how badly the killers fit the next useful line.
-    fn badness(&self, nd: &Node, l0: i32, cnt: &mut [u8], touched: &mut Vec<u16>) -> u32 {
-        let [a, b] = self.de;
-        let both = nd.act >> a & 1 == 1 && nd.act >> b & 1 == 1;
-        let cands: Vec<i32> = match both {
-            false => vec![l0],
-            true => {
-                let la = self.dline[0][nd.pos[a] as usize];
-                let lb = self.dline[1][nd.pos[b] as usize];
-                let unmade = |line: i32| {
-                    (0..self.np).any(|c| self.key[c] == line && nd.bits[c / 64] >> (c % 64) & 1 == 0)
-                };
-                let mut v: Vec<i32> = [la, lb]
-                    .into_iter()
-                    .filter(|&l| l != NOLINE)
-                    .flat_map(|l| [l - 1, l, l + 1])
-                    .filter(|&x| x >= self.lmin && x <= self.lmax && unmade(x))
-                    .collect();
-                if v.is_empty() {
-                    v.push(if la != NOLINE { la } else { lb });
+    pub const IDENTITY: Sym = Sym { mirror: false, rot: 0 };
+
+    pub const ALL: [Sym; 12] = {
+        let mut all = [IDENTITY; 12];
+        let mut i = 0;
+        while i < 12 {
+            all[i] = Sym { mirror: i >= 6, rot: (i % 6) as u8 };
+            i += 1;
+        }
+        all
+    };
+
+    impl Sym {
+        /// The emitter that emitter `k` becomes on the transformed board. A rotation shifts
+        /// directions by one per 60°; the mirror swaps ↘/↗ and ↙/↖ and reverses the ring.
+        fn emitter(self, k: usize) -> usize {
+            let k = if self.mirror { (6 - k) % 6 } else { k };
+            (k + self.rot as usize) % 6
+        }
+
+        /// Instruction code as seen on the transformed board (the mirror swaps F and B).
+        fn code(self, c: u16) -> u16 {
+            match (self.mirror, c) {
+                (true, FWD) => BWD,
+                (true, BWD) => FWD,
+                _ => c,
+            }
+        }
+
+        /// A line for the original board -> the equivalent line for the transformed board.
+        pub fn forward(self, a: Action) -> Action {
+            (0..6).fold(0, |b, k| b | self.code(op(a, k)) << (2 * self.emitter(k)))
+        }
+
+        /// A line for the transformed board -> the equivalent line for the original board.
+        pub fn back(self, a: Action) -> Action {
+            (0..6).fold(0, |b, k| b | self.code(op(a, self.emitter(k))) << (2 * k))
+        }
+
+        /// The pattern moved by this symmetry (on a board of the same shape).
+        pub fn pattern(self, p: &Pattern) -> Pattern {
+            let r = p.board.r as i64;
+            let mut grid = p.board.grid.clone();
+            for &(y, x) in &p.cells {
+                grid[y][x] = b'O';
+            }
+            for &(y, x) in &p.cells {
+                let y = if self.mirror { 2 * r - y as i64 } else { y as i64 };
+                // Axial coordinates around the centre: x = 2R + 2a + b, y = R + b.
+                let mut b = y - r;
+                let mut a = (x as i64 - 2 * r - b) / 2;
+                for _ in 0..self.rot {
+                    (a, b) = (-b, a + b);
                 }
-                v
+                grid[(r + b) as usize][(2 * r + 2 * a + b) as usize] = b'M';
             }
-        };
-        // cnt marks cells crossed by an active killer
-        touched.clear();
-        for e in 0..6 {
-            if self.is_d(e) || nd.act >> e & 1 == 0 {
-                continue;
+            Pattern::new(Board { r: p.board.r, grid })
+        }
+    }
+}
+
+/// One beam-search attempt: from a start state, find a program reaching `count` copies within
+/// `max_ticks` lines. This is the hot loop.
+///
+/// Every tick expands each beam state by all instruction lines (up to 4^6). Options are grouped
+/// per emitter by the beam they produce (an emitter that is off and stays off, or whose beam
+/// hits nothing, yields the same matter whatever it does), so the matter update and scoring run
+/// once per beam combination; the members of a group ("variants") only differ in emitter
+/// positions and get their score by one addition. The beam combinations are enumerated
+/// depth-first with shared prefixes: emitter `k`'s beam is added to the hit counters of the
+/// first `k` emitters (bitsets for >=1, >=2, >=3 hits).
+mod beam {
+    use super::geo::{EMPTY, Geo};
+    use super::sim::{self, State};
+    use super::{Action, BWD, FWD, NOP, TOGGLE};
+
+    /// Search knobs (defaults = beam5.c's as run by cloud_beam.py).
+    #[derive(Clone, Debug)]
+    pub struct Params {
+        /// States kept per tick.
+        pub width: usize,
+        /// Children kept per parent.
+        pub kcap: usize,
+        /// The stage-2 pool (tail rerank) holds `pool * width` states.
+        pub pool: usize,
+        /// Score weight per painted pattern cell.
+        pub wa: i64,
+        /// Score weight per step an emitter needs to reach a useful line (or to switch on).
+        pub wd: i64,
+        /// 0: never put matter on the halo. > 0: allowed, this penalty per halo cell with matter.
+        pub hp: i64,
+        /// Tie-break noise added to every child score: uniform `0..=tn`, plus `0..nz`.
+        pub tn: u32,
+        pub nz: u32,
+        /// A state is in the tail when at most this percentage of the pattern is missing.
+        pub tail_pct: usize,
+        /// Tail: penalty per missing cell and step of the second-closest emitter line (cap 6).
+        pub h2: i64,
+    }
+
+    impl Default for Params {
+        fn default() -> Params {
+            Params { width: 800, kcap: 30, pool: 3, wa: 100, wd: 5, hp: 0, tn: 10, nz: 0, tail_pct: 25, h2: 30 }
+        }
+    }
+
+    /// Counters of one attempt (for benchmarks).
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Stats {
+        pub ticks: usize,
+        /// Children (instruction lines) considered.
+        pub children: u64,
+        /// Beam combinations evaluated (matter update + scoring).
+        pub leaves: u64,
+    }
+
+    /// Runs one attempt. `abort` is polled every tick. Returns the lines after `start`.
+    pub fn search(
+        geo: &Geo,
+        start: &State,
+        count: usize,
+        max_ticks: usize,
+        prm: &Params,
+        seed: u64,
+        abort: &dyn Fn() -> bool,
+    ) -> (Option<Vec<Action>>, Stats) {
+        match geo.nw {
+            1 => Search::<1>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            2 => Search::<2>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            3 => Search::<3>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            4 => Search::<4>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            5 => Search::<5>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            6 => Search::<6>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            7 => Search::<7>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+            _ => Search::<8>::new(geo, count, prm, seed).run(start, max_ticks, abort),
+        }
+    }
+
+    /// Score of a child: copies dominate, then painted cells, minus distance penalties; times
+    /// 1024 plus random tie-break bits.
+    const COPY_SCORE: i64 = 10_000_000;
+    const NO_BEAM: u32 = u32::MAX;
+    /// Local candidate buffer is cut back to `kcap` whenever it reaches this size.
+    const LOCAL_LIMIT: usize = 256;
+
+    /// One option of one emitter: its instruction (already shifted into place) and penalty.
+    #[derive(Clone, Copy, Default)]
+    struct Variant {
+        code: u16,
+        pen: i32,
+    }
+
+    /// Options of one emitter that produce the same beam.
+    #[derive(Clone, Copy)]
+    struct Group {
+        /// Index into `geo.beam`, or [`NO_BEAM`].
+        beam: u32,
+        n: usize,
+        vars: [Variant; 4],
+    }
+
+    const NO_GROUP: Group = Group { beam: NO_BEAM, n: 0, vars: [Variant { code: 0, pen: 0 }; 4] };
+
+    /// A child that survived its parent's cap: score, state hash, where it came from.
+    #[derive(Clone, Copy)]
+    struct Cand {
+        key: i64,
+        hash: u64,
+        parent: u32,
+        code: Action,
+    }
+
+    struct Search<'g, const NW: usize> {
+        geo: &'g Geo,
+        count: usize,
+        prm: Params,
+        rng: u64,
+        pat: [u64; NW],
+        halo: [u64; NW],
+        stats: Stats,
+
+        // --- per parent ---
+        m: [u64; NW],
+        subs: u8,
+        groups: [[Group; 4]; 6],
+        ngroups: [usize; 6],
+        /// `reach[k]`: every cell some option of emitters `k..6` could still hit.
+        reach: [[u64; NW]; 7],
+        /// Hit counters after the first `k` emitters: >=1, >=2, >=3 beams.
+        c1: [[u64; NW]; 7],
+        c2: [[u64; NW]; 7],
+        c3: [[u64; NW]; 7],
+        /// Variant lists: `vars[l][..nvars[l]]` = (code, penalty) combinations built at level `l`.
+        vars: Vec<[(u16, i32); 4096]>,
+        nvars: [usize; 7],
+        /// Children of the current parent that may make its top `kcap`: (key, code).
+        local: Vec<(i64, u16)>,
+        local_thr: i64,
+        found: Option<Action>,
+
+        // --- per tick ---
+        pool: Vec<Cand>,
+        pool_thr: i64,
+        seen: Vec<u64>,
+    }
+
+    impl<'g, const NW: usize> Search<'g, NW> {
+        fn new(geo: &'g Geo, count: usize, prm: &Params, seed: u64) -> Self {
+            let keep = prm.pool * prm.width;
+            Search {
+                geo,
+                count,
+                prm: prm.clone(),
+                rng: super::opt::mix(seed) | 1,
+                pat: std::array::from_fn(|w| geo.pat[w]),
+                halo: std::array::from_fn(|w| geo.halo[w]),
+                stats: Stats::default(),
+                m: [0; NW],
+                subs: 0,
+                groups: [[NO_GROUP; 4]; 6],
+                ngroups: [0; 6],
+                reach: [[0; NW]; 7],
+                c1: [[0; NW]; 7],
+                c2: [[0; NW]; 7],
+                c3: [[0; NW]; 7],
+                vars: vec![[(0, 0); 4096]; 7],
+                nvars: [0; 7],
+                local: Vec::with_capacity(LOCAL_LIMIT + 4096),
+                local_thr: i64::MIN,
+                found: None,
+                pool: Vec::with_capacity(8 * keep + 64),
+                pool_thr: i64::MIN,
+                seen: vec![0; (4 * keep).next_power_of_two()],
             }
-            for &c in &self.rbeam[e][nd.pos[e] as usize] {
-                if cands.contains(&self.key[c as usize]) {
-                    if cnt[c as usize] == 0 {
-                        touched.push(c);
+        }
+
+        fn rand(&mut self) -> u64 {
+            self.rng ^= self.rng << 13;
+            self.rng ^= self.rng >> 7;
+            self.rng ^= self.rng << 17;
+            self.rng
+        }
+
+        fn run(mut self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
+            let keep = self.prm.pool * self.prm.width;
+            let cap = 8 * keep.max(1024);
+            let mut cur = vec![*start];
+            // hist[t][i] = (parent index at tick t, line) of state i after tick t + 1.
+            let mut hist: Vec<Vec<(u32, Action)>> = Vec::new();
+            let mut next: Vec<State> = Vec::with_capacity(keep);
+            let mut order: Vec<(i64, u32)> = Vec::with_capacity(keep);
+            for tick in 0..max_ticks {
+                if abort() {
+                    return (None, self.stats);
+                }
+                self.stats.ticks = tick + 1;
+                self.pool.clear();
+                self.pool_thr = i64::MIN;
+                for (pi, parent) in cur.iter().enumerate() {
+                    self.expand(parent);
+                    if let Some(code) = self.found {
+                        let mut prog = vec![code];
+                        let mut i = pi;
+                        for h in hist.iter().rev() {
+                            prog.push(h[i].1);
+                            i = h[i].0 as usize;
+                        }
+                        prog.reverse();
+                        return (Some(prog), self.stats);
                     }
-                    cnt[c as usize] += 1;
+                    for &(key, code) in &self.local {
+                        let child = sim::step::<NW>(self.geo, parent, code);
+                        self.pool.push(Cand { key, hash: hash::<NW>(&child), parent: pi as u32, code });
+                    }
+                    if self.pool.len() >= cap {
+                        self.compact(keep);
+                    }
+                }
+                self.compact(keep);
+                if self.pool.is_empty() {
+                    return (None, self.stats);
+                }
+                // Stage 2: materialise the pool, rerank states in the tail, keep `width`.
+                next.clear();
+                order.clear();
+                for (i, c) in self.pool.iter().enumerate() {
+                    let s = sim::step::<NW>(self.geo, &cur[c.parent as usize], c.code);
+                    order.push((c.key - 1024 * self.prm.h2 * self.tail_penalty(&s), i as u32));
+                    next.push(s);
+                }
+                let width = self.prm.width.min(order.len());
+                if width < order.len() {
+                    order.select_nth_unstable_by(width - 1, |a, b| b.cmp(a));
+                    order.truncate(width);
+                }
+                hist.push(order.iter().map(|&(_, i)| (self.pool[i as usize].parent, self.pool[i as usize].code)).collect());
+                cur.clear();
+                cur.extend(order.iter().map(|&(_, i)| next[i as usize]));
+            }
+            (None, self.stats)
+        }
+
+        /// Sorts the pool by score, drops duplicate states, keeps the best `keep`.
+        fn compact(&mut self, keep: usize) {
+            self.pool.sort_unstable_by(|a, b| b.key.cmp(&a.key).then(a.hash.cmp(&b.hash)));
+            self.seen.fill(0);
+            let mask = self.seen.len() - 1;
+            let mut n = 0;
+            for i in 0..self.pool.len() {
+                if n == keep {
+                    break;
+                }
+                let h = self.pool[i].hash | 1;
+                let mut j = (h >> 7) as usize & mask;
+                let dup = loop {
+                    match self.seen[j] {
+                        0 => break false,
+                        x if x == h => break true,
+                        _ => j = (j + 1) & mask,
+                    }
+                };
+                if !dup {
+                    self.seen[j] = h;
+                    self.pool[n] = self.pool[i];
+                    n += 1;
+                }
+            }
+            self.pool.truncate(n);
+            if n == keep {
+                self.pool_thr = self.pool[n - 1].key;
+            }
+        }
+
+        /// Tail heuristic: once few pattern cells are missing, each of them needs two emitters
+        /// lined up; sum over missing cells of the second-closest emitter's distance (cap 6).
+        fn tail_penalty(&self, s: &State) -> i64 {
+            let geo = self.geo;
+            let missing: u32 = (0..NW).map(|w| (self.pat[w] & !s.m[w]).count_ones()).sum();
+            if missing == 0 || missing as usize * 100 > geo.npat * self.prm.tail_pct || self.prm.h2 == 0 {
+                return 0;
+            }
+            let off: [i64; 6] = std::array::from_fn(|k| geo.offset(k, s.pos[k] as usize) as i64);
+            let mut total = 0;
+            for w in 0..NW {
+                let mut bits = self.pat[w] & !s.m[w];
+                while bits != 0 {
+                    let j = w * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let (mut d1, mut d2) = (99, 99);
+                    for k in 0..6 {
+                        let d = (off[k] - geo.line[j * 6 + k] as i64).abs() + (s.act >> k & 1 == 0) as i64;
+                        if d < d1 {
+                            (d1, d2) = (d, d1);
+                        } else if d < d2 {
+                            d2 = d;
+                        }
+                    }
+                    total += d2.min(6);
+                }
+            }
+            total
+        }
+
+        /// Builds the emitter option groups of `parent` (with their distance penalties).
+        fn prepare(&mut self, parent: &State) {
+            let geo = self.geo;
+            let r2 = 2 * geo.r;
+            self.m = std::array::from_fn(|w| parent.m[w]);
+            self.subs = parent.subs;
+            let unpainted: [u64; NW] = std::array::from_fn(|w| self.pat[w] & !parent.m[w]);
+            for k in 0..6 {
+                // Window offsets whose beam would paint a missing pattern cell.
+                let mut useful = 0u64;
+                for o in 0..=r2 {
+                    let b = geo.beam(k, geo.pos_at(k, o));
+                    if (0..NW).any(|w| b[w] & unpainted[w] != 0) {
+                        useful |= 1 << o;
+                    }
+                }
+                let p = parent.pos[k] as usize;
+                let on = parent.act >> k & 1 == 1;
+                let o = geo.offset(k, p);
+                // Moves stay inside the window (or head back into it).
+                let fwd_ok = o + 1 <= r2 || o > r2;
+                let bwd_ok = (o >= 1 && o <= r2) || o > r2;
+                let mut opts: [(u16, usize, bool); 4] = [(NOP, p, on); 4];
+                let mut nopts = 1;
+                if fwd_ok {
+                    opts[nopts] = (FWD, sim::moved(geo, p, FWD), on);
+                    nopts += 1;
+                }
+                if bwd_ok {
+                    opts[nopts] = (BWD, sim::moved(geo, p, BWD), on);
+                    nopts += 1;
+                }
+                opts[nopts] = (TOGGLE, p, !on);
+                nopts += 1;
+                let mut ng = 0;
+                for &(code, q, a) in &opts[..nopts] {
+                    let id = if a { geo.beam_id[k * geo.ring + q] } else { EMPTY };
+                    let beam = if id == EMPTY { NO_BEAM } else { (k * geo.ring + q) as u32 };
+                    let dist = distance(useful, geo.offset(k, q), r2) + (useful != 0 && !a) as i64;
+                    let var = Variant { code: code << (2 * k), pen: (self.prm.wd * dist) as i32 };
+                    let same = |g: &Group| {
+                        g.beam == beam || (g.beam != NO_BEAM && beam != NO_BEAM && geo.beam_id[g.beam as usize] == id)
+                    };
+                    match self.groups[k][..ng].iter().position(same) {
+                        Some(g) => {
+                            let grp = &mut self.groups[k][g];
+                            grp.vars[grp.n] = var;
+                            grp.n += 1;
+                        }
+                        None => {
+                            self.groups[k][ng] = Group { beam, n: 1, vars: [var; 4] };
+                            ng += 1;
+                        }
+                    }
+                }
+                self.ngroups[k] = ng;
+            }
+            self.reach[6] = [0; NW];
+            for k in (0..6).rev() {
+                let mut u = self.reach[k + 1];
+                for g in &self.groups[k][..self.ngroups[k]] {
+                    if g.beam != NO_BEAM {
+                        let b = &geo.beam[g.beam as usize];
+                        for w in 0..NW {
+                            u[w] |= b[w];
+                        }
+                    }
+                }
+                self.reach[k] = u;
+            }
+        }
+
+        /// Expands one parent: fills `self.local` with its best `kcap` children (or sets `found`).
+        fn expand(&mut self, parent: &State) {
+            self.prepare(parent);
+            self.local.clear();
+            self.local_thr = i64::MIN;
+            self.c1[0] = [0; NW];
+            self.c2[0] = [0; NW];
+            self.c3[0] = [0; NW];
+            self.vars[0][0] = (0, 0);
+            self.nvars[0] = 1;
+            self.dfs(0, 0, 0, 0);
+            if self.local.len() > self.prm.kcap {
+                let k = self.prm.kcap;
+                self.local.select_nth_unstable_by(k - 1, |a, b| b.cmp(a));
+                self.local.truncate(k);
+            }
+        }
+
+        /// Depth-first over the beam groups of emitters `k..6`. The variant combinations so far
+        /// are `vars[src]`, each plus `(dcode, dpen)`.
+        fn dfs(&mut self, k: usize, src: usize, dcode: u16, dpen: i32) {
+            if k == 6 {
+                self.leaf(src, dcode, dpen);
+                return;
+            }
+            for g in 0..self.ngroups[k] {
+                if self.found.is_some() {
+                    return;
+                }
+                let grp = self.groups[k][g];
+                if grp.beam == NO_BEAM {
+                    self.c1[k + 1] = self.c1[k];
+                    self.c2[k + 1] = self.c2[k];
+                    self.c3[k + 1] = self.c3[k];
+                } else {
+                    let b = &self.geo.beam[grp.beam as usize];
+                    for w in 0..NW {
+                        let (x1, x2, x3) = (self.c1[k][w], self.c2[k][w], self.c3[k][w]);
+                        self.c3[k + 1][w] = x3 | (x2 & b[w]);
+                        self.c2[k + 1][w] = x2 | (x1 & b[w]);
+                        self.c1[k + 1][w] = x1 | b[w];
+                    }
+                }
+                if self.prm.hp == 0 {
+                    // A halo cell hit exactly twice that no later emitter can reach gets matter.
+                    let mut bad = 0;
+                    for w in 0..NW {
+                        bad |= self.c2[k + 1][w] & !self.c3[k + 1][w] & self.halo[w] & !self.reach[k + 1][w];
+                    }
+                    if bad != 0 {
+                        continue;
+                    }
+                }
+                if grp.n == 1 {
+                    let v = grp.vars[0];
+                    self.dfs(k + 1, src, dcode | v.code, dpen + v.pen);
+                } else {
+                    let (lo, hi) = self.vars.split_at_mut(k + 1);
+                    let (from, to) = (&lo[src][..self.nvars[src]], &mut hi[0]);
+                    let mut n = 0;
+                    for &(c, p) in from {
+                        for v in &grp.vars[..grp.n] {
+                            to[n] = (c | dcode | v.code, p + dpen + v.pen);
+                            n += 1;
+                        }
+                    }
+                    self.nvars[k + 1] = n;
+                    self.dfs(k + 1, k + 1, 0, 0);
                 }
             }
         }
-        let mut best = u32::MAX;
-        for &l in &cands {
-            let mut bad = 0;
-            for c in 0..self.nrel {
-                if self.key[c] != l {
+
+        /// One beam combination: matter update, detection, then every variant as a child.
+        #[inline]
+        fn leaf(&mut self, src: usize, dcode: u16, dpen: i32) {
+            self.stats.leaves += 1;
+            self.stats.children += self.nvars[src] as u64;
+            let (c2, c3) = (&self.c2[6], &self.c3[6]);
+            let (mut halo_hit, mut missing, mut painted, mut junk) = (0u64, 0u64, 0u32, 0u32);
+            for w in 0..NW {
+                let two = c2[w] & !c3[w];
+                let nm = (self.m[w] | two) & !c3[w];
+                halo_hit |= two & self.halo[w];
+                missing |= self.pat[w] & !nm;
+                painted += (nm & self.pat[w]).count_ones();
+                junk += (nm & self.halo[w]).count_ones();
+            }
+            if self.prm.hp == 0 && halo_hit != 0 {
+                return;
+            }
+            let full = missing == 0 && junk == 0;
+            let subs = self.subs as i64 + full as i64;
+            if subs as usize >= self.count {
+                self.found = Some(self.vars[src][0].0 | dcode);
+                return;
+            }
+            let painted = if full { 0 } else { painted as i64 };
+            let base = subs * COPY_SCORE + painted * self.prm.wa - junk as i64 * self.prm.hp - dpen as i64;
+            let max_noise = (self.prm.tn + self.prm.nz) as i64;
+            let (tn1, nz) = (self.prm.tn as u64 + 1, self.prm.nz as u64);
+            for i in 0..self.nvars[src] {
+                let (code, pen) = self.vars[src][i];
+                let sc = base - pen as i64;
+                let thr = self.local_thr.max(self.pool_thr);
+                if (sc + max_noise) * 1024 + 1023 < thr {
                     continue;
                 }
-                let crossed = cnt[c] > 0;
-                if c >= self.np && !crossed {
-                    bad += 1;
+                let r = self.rand();
+                let noise = ((r & 0xffff_ffff) * tn1 >> 32) + (((r >> 32) & 0x3f_ffff) * nz >> 22);
+                let key = (sc + noise as i64) * 1024 + (r >> 54) as i64;
+                if key < thr {
+                    continue;
                 }
-                if c < self.np && crossed {
-                    bad += 1;
+                self.local.push((key, code | dcode));
+                if self.local.len() >= LOCAL_LIMIT {
+                    let k = self.prm.kcap;
+                    self.local.select_nth_unstable_by(k - 1, |a, b| b.cmp(a));
+                    self.local.truncate(k);
+                    self.local_thr = self.local[k - 1].0;
                 }
             }
-            best = best.min(bad);
         }
-        for &c in touched.iter() {
-            cnt[c as usize] = 0;
+    }
+
+    /// Steps from window offset `o` to the nearest set bit of `useful` (0 if none). Offsets
+    /// beyond `r2` are outside the window and first walk back to its nearer end.
+    fn distance(useful: u64, o: usize, r2: usize) -> i64 {
+        if useful == 0 {
+            return 0;
+        }
+        if o > r2 {
+            return 99;
+        }
+        let up = useful >> o;
+        let d_up = if up != 0 { up.trailing_zeros() as i64 } else { 99 };
+        let down = useful << (63 - o);
+        let d_down = if down != 0 { down.leading_zeros() as i64 } else { 99 };
+        d_up.min(d_down)
+    }
+
+    fn hash<const NW: usize>(s: &State) -> u64 {
+        const K: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut h = K;
+        for w in 0..NW {
+            h = (h ^ s.m[w]).wrapping_mul(K);
+            h ^= h >> 29;
+        }
+        let mut e = s.act as u64 | (s.subs as u64) << 8;
+        for k in 0..6 {
+            e |= (s.pos[k] as u64) << (16 + 8 * k);
+        }
+        h = (h ^ e).wrapping_mul(K);
+        h ^ (h >> 31)
+    }
+}
+
+/// Known programs to start from.
+mod seeds {
+    use super::geo::Geo;
+    use super::{Action, Case, pack, parse_program, sim, split_programs};
+    use std::path::PathBuf;
+
+    /// `L6_SEED_DIR` if set (empty = no seeds), else `work/level6/best` of this repo if it exists.
+    fn dir() -> Option<PathBuf> {
+        match std::env::var("L6_SEED_DIR") {
+            Ok(d) if d.is_empty() => None,
+            Ok(d) => Some(PathBuf::from(d)),
+            Err(_) => {
+                let d = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../work/level6/best"));
+                d.is_dir().then_some(d)
+            }
+        }
+    }
+
+    /// Per case, the shortest valid program among all files in the seed directory that have one
+    /// program per case (cut after the last needed copy).
+    pub fn load(cases: &[Case], geos: &[Geo]) -> Vec<Option<Vec<Action>>> {
+        let mut best: Vec<Option<Vec<Action>>> = vec![None; cases.len()];
+        let Some(dir) = dir() else { return best };
+        let mut files: Vec<PathBuf> =
+            std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+        files.sort();
+        for f in files {
+            let Ok(text) = std::fs::read_to_string(&f) else { continue };
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            let progs = split_programs(&lines);
+            if progs.len() != cases.len() {
+                continue;
+            }
+            for (i, p) in progs.iter().enumerate() {
+                let Ok(prog) = parse_program(p) else { continue };
+                let prog: Vec<Action> = prog.iter().map(pack).collect();
+                if let Some(len) = sim::finish_len(&geos[i], &prog, cases[i].count) {
+                    if best[i].as_ref().is_none_or(|b| len < b.len()) {
+                        best[i] = Some(prog[..len].to_vec());
+                    }
+                }
+            }
         }
         best
     }
+}
 
-    fn setup_left(&self, nd: &Node, l0: i32) -> u32 {
-        let mut s = 0;
-        for i in 0..2 {
-            let e = self.de[i];
-            if nd.act >> e & 1 == 1 {
-                continue;
-            }
-            s += ring_dist(self.n, nd.pos[e] as usize, self.dpos[i][&l0]) as u32 + 1;
-        }
-        s
+/// The optimiser: improves one incumbent per case with repeated beam attempts.
+mod opt {
+    use super::beam::{self, Params};
+    use super::geo::Geo;
+    use super::sim::{self, State};
+    use super::sym::{self, Sym};
+    use super::{Action, Case, count_accepted, seeds, unpack};
+    use std::sync::{Condvar, Mutex};
+
+    /// Beam widths by attempt number (the last one repeats).
+    const WIDTHS: [usize; 4] = [800, 1500, 3000, 6000];
+    /// Fractions of the incumbent kept as a fixed prefix (one is drawn per attempt).
+    const PREFIX: [f64; 7] = [0.0, 0.0, 0.25, 0.4, 0.55, 0.7, 0.85];
+
+    /// SplitMix64 finaliser: a well-mixed 64-bit value from any input.
+    pub fn mix(mut x: u64) -> u64 {
+        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^ (x >> 31)
     }
 
-    /// Candidate instruction pairs for the two D emitters.
-    fn d_options(&self, nd: &Node, l0: i32, free: bool) -> Vec<(u8, u8)> {
-        let all = || {
-            let mut v = Vec::new();
-            for &x in &ACTIONS {
-                for &y in &ACTIONS {
-                    v.push((x, y));
+    fn env_u64(name: &str) -> Option<u64> {
+        std::env::var(name).ok().and_then(|v| v.parse().ok())
+    }
+
+    /// Process-wide limit on concurrent attempts: `cargo ccc all` solves all input files at once,
+    /// and together they must not use more than `CCC_THREADS` cores.
+    static SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+    fn with_slot<R>(f: impl FnOnce() -> R) -> R {
+        let limit = harness::par::threads();
+        let (lock, cv) = &SLOTS;
+        let mut busy = lock.lock().unwrap();
+        while *busy >= limit {
+            busy = cv.wait(busy).unwrap();
+        }
+        *busy += 1;
+        drop(busy);
+        let r = f();
+        *lock.lock().unwrap() -= 1;
+        cv.notify_one();
+        r
+    }
+
+    /// A case's search data: lazily built geometry per symmetry and the incumbent.
+    struct CaseRun<'a> {
+        index: usize,
+        case: &'a Case,
+        geos: Vec<Option<Geo>>,
+        best: Option<Vec<Action>>,
+        attempts: u64,
+    }
+
+    impl CaseRun<'_> {
+        fn geo(&mut self, s: usize) -> &Geo {
+            let case = self.case;
+            self.geos[s].get_or_insert_with(|| Geo::new(&sym::ALL[s].pattern(&case.pattern)))
+        }
+
+        /// One attempt; replaces the incumbent if it finds a shorter valid program.
+        fn attempt(&mut self, seed: u64) {
+            let n = self.attempts;
+            self.attempts += 1;
+            let mut rng = mix(seed ^ mix(self.index as u64) ^ mix(n << 32));
+            let mut draw = |k: usize| {
+                rng = mix(rng);
+                (rng % k as u64) as usize
+            };
+            let count = self.case.count;
+            let (s, prefix, max_ticks, width, abort): (usize, Vec<Action>, usize, usize, bool) = match &self.best {
+                // No incumbent yet: construct from scratch (never aborted, so there is a result).
+                None => (0, Vec::new(), 999, 200 << n.min(4), false),
+                Some(best) => {
+                    let s = if n == 0 { 0 } else { draw(12) };
+                    let npre = (best.len() as f64 * PREFIX[draw(PREFIX.len())]) as usize;
+                    (s, best[..npre].to_vec(), best.len() - 1 - npre, WIDTHS[(n as usize).min(WIDTHS.len() - 1)], true)
                 }
+            };
+            if max_ticks == 0 {
+                return;
             }
-            v
+            let sym = sym::ALL[s];
+            let prm = Params { width, nz: [0, 0, 1, 2][draw(4)], ..Params::default() };
+            let search_seed = rng;
+            let geo = self.geo(s);
+            let fwd: Vec<Action> = prefix.iter().map(|&a| sym.forward(a)).collect();
+            let start = sim::run(geo, &State::start(geo), &fwd);
+            if start.subs as usize >= count {
+                return;
+            }
+            let stop = || abort && harness::budget::expired();
+            let (found, _) = beam::search(geo, &start, count, max_ticks, &prm, search_seed, &stop);
+            let Some(rest) = found else { return };
+            let mut prog = prefix;
+            prog.extend(rest.iter().map(|&a| sym.back(a)));
+            self.offer(prog, sym, width);
+        }
+
+        /// Keeps `prog` if it is valid (exact bitset simulation and `model.rs`) and shorter.
+        fn offer(&mut self, prog: Vec<Action>, sym: Sym, width: usize) {
+            let count = self.case.count;
+            let Some(len) = sim::finish_len(self.geo(0), &prog, count) else {
+                panic!("case {}: beam result does not validate ({sym:?})", self.index)
+            };
+            if self.best.as_ref().is_some_and(|b| b.len() <= len) {
+                return;
+            }
+            let lines: Vec<[u8; 6]> = prog[..len].iter().map(|&a| unpack(a)).collect();
+            assert!(count_accepted(&self.case.pattern, &lines) >= count, "case {}: simulators disagree", self.index);
+            harness::trace!(
+                "case {}: {} -> {len} lines (attempt {}, width {width}, {sym:?})",
+                self.index,
+                self.best.as_ref().map_or(0, |b| b.len()),
+                self.attempts - 1
+            );
+            self.best = Some(prog[..len].to_vec());
+        }
+    }
+
+    /// Which case a worker should attempt next: incumbents first, then round-robin.
+    struct Schedule {
+        busy: Vec<bool>,
+        attempts: Vec<u64>,
+        built: Vec<bool>,
+    }
+
+    /// Best program per case: seeds (if any) improved until the budget runs out, or built from
+    /// scratch. Deterministic per case for a fixed `L6_SEED` and number of attempts.
+    pub fn optimize(cases: &[Case]) -> Vec<Vec<Action>> {
+        let seed = env_u64("L6_SEED").unwrap_or(0);
+        // Without --budget there is no deadline: only construct what has no seed.
+        let rounds = env_u64("L6_ROUNDS").unwrap_or(if harness::budget::per_file().is_some() { u64::MAX } else { 0 });
+        let geos: Vec<Geo> = cases.iter().map(|c| Geo::new(&c.pattern)).collect();
+        let seeded = seeds::load(cases, &geos);
+        let runs: Vec<Mutex<CaseRun>> = cases
+            .iter()
+            .zip(geos)
+            .zip(seeded)
+            .enumerate()
+            .map(|(index, ((case, geo), best))| {
+                let mut geos: Vec<Option<Geo>> = (0..12).map(|_| None).collect();
+                geos[0] = Some(geo);
+                Mutex::new(CaseRun { index, case, geos, best, attempts: 0 })
+            })
+            .collect();
+        let schedule = Mutex::new(Schedule {
+            busy: vec![false; cases.len()],
+            attempts: vec![0; cases.len()],
+            built: runs.iter().map(|r| r.lock().unwrap().best.is_some()).collect(),
+        });
+        let pick = || {
+            let mut s = schedule.lock().unwrap();
+            let expired = harness::budget::expired();
+            let i = (0..cases.len())
+                .filter(|&i| !s.busy[i] && (!s.built[i] || (!expired && s.attempts[i] < rounds)))
+                .min_by_key(|&i| (s.built[i], s.attempts[i], i))?;
+            s.busy[i] = true;
+            Some(i)
         };
-        if free {
-            return all();
-        }
-        let n = self.n;
-        let toward = |_i: usize, p: usize, target: usize| -> u8 {
-            if p == target {
-                b'-'
-            } else if (target + n - p) % n <= n / 2 {
-                b'F'
-            } else {
-                b'B'
-            }
-        };
-        let [a, b] = self.de;
-        if nd.act >> a & 1 == 1 && nd.act >> b & 1 == 1 {
-            let mut per: [Vec<u8>; 2] = [vec![b'-'], vec![b'-']];
-            let cur = [self.dline[0][nd.pos[a] as usize], self.dline[1][nd.pos[b] as usize]];
-            if cur.contains(&NOLINE) {
-                return all();
-            }
-            for i in 0..2 {
-                let p = nd.pos[self.de[i]] as usize;
-                for (act, np) in [(b'F', (p + 1) % n), (b'B', (p + n - 1) % n)] {
-                    let nl = self.dline[i][np];
-                    if nl != NOLINE && nl >= self.lmin && nl <= self.lmax && (nl - cur[1 - i]).abs() <= 2 {
-                        per[i].push(act);
-                    }
+        let threads = harness::par::threads().min(cases.len()).max(1);
+        let workers: Vec<usize> = (0..threads).collect();
+        harness::par::map_threads(threads, &workers, |_| {
+            while let Some(i) = pick() {
+                let mut run = runs[i].lock().unwrap();
+                let was_built = run.best.is_some();
+                with_slot(|| run.attempt(seed));
+                let mut s = schedule.lock().unwrap();
+                s.busy[i] = false;
+                s.built[i] = run.best.is_some();
+                if was_built {
+                    s.attempts[i] += 1;
                 }
             }
-            let mut v = Vec::new();
-            for &x in &per[0] {
-                for &y in &per[1] {
-                    v.push((x, y));
-                }
-            }
-            return v;
-        }
-        let mut per: [Vec<u8>; 2] = [vec![b'-'], vec![b'-']];
-        for i in 0..2 {
-            let e = self.de[i];
-            let p = nd.pos[e] as usize;
-            let target = self.dpos[i][&l0];
-            if nd.act >> e & 1 == 1 {
-                continue;
-            }
-            if p == target {
-                per[i].push(b'T');
-            } else {
-                per[i].push(toward(i, p, target));
-            }
-        }
+        });
+        runs.into_iter().map(|r| r.into_inner().unwrap().best.expect("every case was built")).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::geo::Geo;
+    use super::sim::{self, State};
+    use super::*;
+    use std::path::Path;
+
+    const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+
+    /// (input text, best output lines) for every real input that has a best output.
+    fn best_files() -> Vec<(String, Vec<String>)> {
         let mut v = Vec::new();
-        for &a in &per[0] {
-            for &b in &per[1] {
-                v.push((a, b));
+        for name in ["1-small", "2-medium", "3-large", "4-enormous"] {
+            let inp = Path::new(ROOT).join(format!("work/level6/in/in_level-6_{name}.txt"));
+            let out = Path::new(ROOT).join(format!("work/level6/best/out_level-6_{name}.txt"));
+            if let (Ok(i), Ok(o)) = (std::fs::read_to_string(inp), std::fs::read_to_string(out)) {
+                v.push((i, o.lines().map(str::to_owned).collect()));
             }
         }
         v
     }
 
-    /// Ticks until two emitters could cross on some unmade pattern cell (ignoring skirting).
-    fn finish_dist(&self, nd: &Node) -> u32 {
-        let mut best = u32::MAX;
-        for c in 0..self.np {
-            if nd.bits[c / 64] >> (c % 64) & 1 == 1 {
-                continue;
-            }
-            let (mut m1, mut m2) = (u32::MAX, u32::MAX);
-            for e in 0..6 {
-                let d = self.distc[e][nd.pos[e] as usize * self.np + c];
-                if d == u8::MAX {
-                    continue;
-                }
-                let v = d as u32 + (nd.act >> e & 1 == 0) as u32;
-                if v < m1 {
-                    m2 = m1;
-                    m1 = v;
-                } else if v < m2 {
-                    m2 = v;
-                }
-            }
-            best = best.min(m2);
-        }
-        if best == u32::MAX { 0 } else { best }
+    fn programs(out: &[String]) -> Vec<Vec<Action>> {
+        split_programs(out).iter().map(|p| parse_program(p).unwrap().iter().map(pack).collect()).collect()
     }
 
-    fn search(&self, count: usize, from_max: bool, width: usize) -> Option<Vec<[u8; 6]>> {
-        let l0 = if from_max { self.lmax } else { self.lmin };
-        if !self.dpos[0].contains_key(&l0) || !self.dpos[1].contains_key(&l0) {
-            return None;
+    #[test]
+    fn pack_round_trip() {
+        for a in 0..4096u16 {
+            assert_eq!(pack(&unpack(a)), a);
         }
-        let n = self.n;
-        let killers: Vec<usize> = (0..6).filter(|&e| !self.is_d(e)).collect();
-        let mut cnt = vec![0u8; self.nrel];
-        let mut touched = Vec::new();
-        let root = Node {
-            pos: std::array::from_fn(|e| self.start[e] as u8),
-            act: 0,
-            bits: [0; WORDS],
-            made: 0,
-            copies: 0,
-            parent: u32::MAX,
-            line: [b'-'; 6],
-        };
-        let mut layers: Vec<Vec<Node>> = vec![vec![root]];
-        let max_ticks = 60 + count * (self.np + 10);
-        let (mut best_prog, mut best_at) = (0i64, 0usize);
-        let patience = 4 * self.n / 6 + 12;
-        while layers.len() <= max_ticks {
-            if layers.len() - best_at > patience {
-                harness::trace!("  abort f? from_max={from_max} tick={} best={} of {}", layers.len(), best_prog, self.np * count);
-                return None;
-            }
-            if harness::budget::expired() {
-                return None;
-            }
-            let cur = layers.last().unwrap();
-            let stalled = best_prog > 0 && layers.len() - best_at >= 3;
-            let free_all = std::env::var("L6_FREE").is_ok() && best_prog > 0;
-            let mut cands: Vec<(u64, Node)> = Vec::new();
-            let mut seen = std::collections::HashSet::new();
-            for (pi, nd) in cur.iter().enumerate() {
-                for (da, db) in self.d_options(nd, l0, free_all || stalled || (best_prog > 0 && nd.act >> self.de[0] & 1 == 0) || (best_prog > 0 && nd.act >> self.de[1] & 1 == 0)) {
-                    for combo in 0..256usize {
-                        let mut line = [b'-'; 6];
-                        line[self.de[0]] = da;
-                        line[self.de[1]] = db;
-                        for (k, &e) in killers.iter().enumerate() {
-                            line[e] = ACTIONS[(combo >> (2 * k)) & 3];
-                        }
-                        let mut pos = nd.pos;
-                        let mut act = nd.act;
-                        for e in 0..6 {
-                            match line[e] {
-                                b'T' => act ^= 1 << e,
-                                a => pos[e] = step_pos(n, pos[e] as usize, a) as u8,
-                            }
-                        }
-                        let mut bits = nd.bits;
-                        if !self.apply(&pos, act, &mut bits, &mut cnt, &mut touched) {
-                            continue;
-                        }
-                        let mut made: u32 = bits.iter().map(|w| w.count_ones()).sum();
-                        let mut copies = nd.copies;
-                        if made as usize == self.np {
-                            copies += 1;
-                            made = 0;
-                            bits = [0; WORDS];
-                        }
-                        let mut h: u64 = 0xcbf29ce484222325;
-                        for &x in pos.iter().chain([act].iter()) {
-                            h = (h ^ x as u64).wrapping_mul(0x100000001b3);
-                        }
-                        for &w in &bits {
-                            h = (h ^ w).wrapping_mul(0x100000001b3);
-                        }
-                        h = (h ^ copies as u64).wrapping_mul(0x100000001b3);
-                        if !seen.insert(h) {
-                            continue;
-                        }
-                        let child = Node { pos, act, bits, made: made as u16, copies, parent: pi as u32, line };
-                        if copies as usize >= count {
-                            let mut prog = vec![line];
-                            let mut p = pi;
-                            for layer in layers.iter().rev() {
-                                let nd = &layer[p];
-                                if nd.parent == u32::MAX {
-                                    break;
-                                }
-                                prog.push(nd.line);
-                                p = nd.parent as usize;
-                            }
-                            prog.reverse();
-                            if std::env::var("L6_TRACE").is_ok() {
-                                let mut path = vec![];
-                                let mut p = pi;
-                                for layer in layers.iter().rev() {
-                                    let nd = &layer[p];
-                                    path.push((nd.pos, nd.act, nd.made, nd.copies));
-                                    if nd.parent == u32::MAX { break; }
-                                    p = nd.parent as usize;
-                                }
-                                path.reverse();
-                                let f = self.de[0];
-                                for (t, (pos, act, made, copies)) in path.iter().enumerate() {
-                                    let la = self.dline[0][pos[self.de[0]] as usize];
-                                    let lb = self.dline[1][pos[self.de[1]] as usize];
-                                    eprintln!("f={f} t={t} D=({la},{lb}) act={act:06b} made={made} copies={copies}");
-                                }
-                            }
-                            return Some(prog);
-                        }
-                        cands.push((h, child));
-                    }
-                }
-            }
-            if cands.is_empty() {
-                harness::trace!("  dead from_max={from_max} tick={} best={} of {}", layers.len(), best_prog, self.np * count);
-                return None;
-            }
-            // rank: progress desc, setup left asc, badness asc, hash
-            let mut keyed: Vec<(i64, u32, u32, u32, u64, usize)> = cands
-                .iter()
-                .enumerate()
-                .map(|(i, (h, c))| {
-                    let prog = c.copies as i64 * self.np as i64 + c.made as i64;
-                    let sl = if best_prog > 0 { 0 } else { self.setup_left(c, l0) };
-                    (-prog, sl, 0, 0, *h, i)
-                })
-                .collect();
-            // badness only for the plausible top part
-            keyed.sort_unstable();
-            if -keyed[0].0 > best_prog {
-                best_prog = -keyed[0].0;
-                best_at = layers.len();
-            }
-            let keep = (width * 8).min(keyed.len());
-            for k in keyed[..keep].iter_mut() {
-                let nd = &cands[k.5].1;
-                let bad = self.badness(nd, l0, &mut cnt, &mut touched);
-                let fin = self.finish_dist(nd);
-                (k.2, k.3) = if stalled { (fin, bad) } else { (bad, fin) };
-            }
-            keyed.truncate(keep);
-            keyed.sort_unstable();
-            keyed.truncate(width);
-            let mut taken: Vec<Option<Node>> = cands.into_iter().map(|(_, c)| Some(c)).collect();
-            layers.push(keyed.iter().map(|k| taken[k.5].take().unwrap()).collect());
-        }
-        None
-    }
-}
-
-/// Port of the teammate's C++ beam search (Archive.zip, beam.cpp): per tick, every beam state tries
-/// all 4^6 instruction combinations; moves that put matter on skirting are discarded; states are
-/// ranked by completed copies, then unmade pattern cells and the ring distance the emitters still
-/// need to reach a crossing for each unmade cell.
-mod zip_beam {
-    use super::Case;
-    use crate::model::Rig;
-    use std::collections::{BTreeMap, HashSet};
-
-    const WORDS: usize = 8;
-    type Bits = [u64; WORDS];
-
-    pub struct Params {
-        pub width: usize,
-        /// Weights scaled by 1000 (C++ defaults: Wu = 3, Wc = 1).
-        pub wu: i64,
-        pub wc: i64,
-        /// 0: never put matter on skirting (original). >0: allow it temporarily, penalised by
-        /// this weight (x1000) per polluted skirting cell; detection still needs clean skirting.
-        pub wk: i64,
-        pub max_ticks: usize,
-        /// Give up on a case after this many seconds (the caller falls back to another solver).
-        pub max_secs: f64,
-        /// 1: zip scoring (distance heuristic, skirting forbidden unless wk > 0).
-        /// 2: friend's newer beam.py scoring (skirting allowed, penalised; beam-cover tie-break).
-        pub mode: u8,
     }
 
-    impl Params {
-        pub fn from_env() -> Params {
-            let get = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-            Params {
-                width: get("L6_ZW", 100.0) as usize,
-                wu: (get("L6_WU", 3.0) * 1000.0) as i64,
-                wc: (get("L6_WC", 1.0) * 1000.0) as i64,
-                wk: (get("L6_SKIRT", 0.0) * 1000.0) as i64,
-                max_ticks: 100_000,
-                max_secs: get("L6_TMAX", 60.0),
-                mode: get("L6_MODE", 1.0) as u8,
+    #[test]
+    fn symmetry_line_round_trip() {
+        for s in sym::ALL {
+            for a in 0..4096u16 {
+                assert_eq!(s.back(s.forward(a)), a, "{s:?}");
             }
         }
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-    struct State {
-        idx: [u8; 6],
-        act: u8,
-        acc: u32,
-        m: Bits,
-    }
-
-    struct Solver {
-        p: usize,
-        nwords: usize,
-        n_s: usize,
-        smask: Bits,
-        kmask: Bits,
-        /// ray[i * 6 + t]: universe cells hit by emitter t at ring position i.
-        ray: Vec<Bits>,
-        /// cost[(t * p + i) * 2 + active][s]: ring distance of emitter t at i to a position whose
-        /// beam covers pattern cell s, plus 1 when it still has to be switched on.
-        cost: Vec<Vec<u8>>,
-        start: [usize; 6],
-    }
-
-    fn bit(b: &Bits, i: usize) -> bool {
-        b[i >> 6] >> (i & 63) & 1 == 1
-    }
-
-    impl Solver {
-        fn new(c: &Case) -> Option<Solver> {
-            let pat = &c.pattern;
-            let n_s = pat.cells.len();
-            let n_u = n_s + pat.skirting.len();
-            if n_s == 0 || n_u > WORDS * 64 {
-                return None;
-            }
-            let nwords = n_u.div_ceil(64);
-            let mut uid = BTreeMap::new();
-            for (i, &cell) in pat.cells.iter().chain(&pat.skirting).enumerate() {
-                uid.insert(cell, i);
-            }
-            let mut smask = [0u64; WORDS];
-            let mut kmask = [0u64; WORDS];
-            for i in 0..n_u {
-                if i < n_s {
-                    smask[i >> 6] |= 1 << (i & 63);
-                } else {
-                    kmask[i >> 6] |= 1 << (i & 63);
+    /// Every symmetric copy of a program detects as many copies on the symmetric board.
+    #[test]
+    fn symmetry_preserves_programs() {
+        for (input, out) in best_files() {
+            let cases = parse(&input);
+            for (c, prog) in cases.iter().zip(programs(&out)).step_by(7) {
+                for s in sym::ALL {
+                    let p2 = s.pattern(&c.pattern);
+                    assert_eq!(p2.cells.len(), c.pattern.cells.len());
+                    let lines: Vec<[u8; 6]> = prog.iter().map(|&a| unpack(s.forward(a))).collect();
+                    assert!(count_accepted(&p2, &lines) >= c.count, "{s:?}");
                 }
             }
-            let rig = Rig::new(pat.board.r);
-            let p = rig.ring.len();
-            let mut ray = vec![[0u64; WORDS]; p * 6];
-            for (i, &(y, x)) in rig.ring.iter().enumerate() {
-                for t in 0..6 {
-                    for cell in pat.board.beam_cells(y, x, t as u8 + 1) {
-                        if let Some(&u) = uid.get(&cell) {
-                            ray[i * 6 + t][u >> 6] |= 1 << (u & 63);
-                        }
-                    }
-                }
-            }
-            let mut cost = vec![vec![200u8; n_s]; 6 * p * 2];
-            for t in 0..6 {
-                for s in 0..n_s {
-                    let Some(pos) = (0..p).find(|&i| bit(&ray[i * 6 + t], s)) else { continue };
-                    for i in 0..p {
-                        let d = i.abs_diff(pos);
-                        let d = d.min(p - d) as u8;
-                        cost[(t * p + i) * 2 + 1][s] = d;
-                        cost[(t * p + i) * 2][s] = d + 1;
-                    }
-                }
-            }
-            Some(Solver { p, nwords, n_s, smask, kmask, ray, cost, start: rig.pos })
         }
+    }
 
-        /// Next state and score for `action` (2 bits per emitter: 0 '-', 1 'T', 2 'F', 3 'B'),
-        /// or None if it puts matter on skirting.
-        fn apply(&self, s: &State, action: usize, prm: &Params, best: &mut [u8]) -> Option<(State, i64)> {
-            let mut o = *s;
-            let (mut c1, mut c2, mut c3) = ([0u64; WORDS], [0u64; WORDS], [0u64; WORDS]);
-            for t in 0..6 {
-                let mut ii = s.idx[t] as usize;
-                let mut ac = s.act >> t & 1;
-                match action >> (2 * t) & 3 {
-                    1 => ac ^= 1,
-                    2 => ii = (ii + 1) % self.p,
-                    3 => ii = (ii + self.p - 1) % self.p,
-                    _ => {}
-                }
-                o.idx[t] = ii as u8;
-                o.act = (o.act & !(1 << t)) | (ac << t);
-                if ac == 1 {
-                    let m = &self.ray[ii * 6 + t];
-                    for w in 0..self.nwords {
-                        c3[w] |= c2[w] & m[w];
-                        c2[w] |= c1[w] & m[w];
-                        c1[w] |= m[w];
+    /// The bitset simulator agrees with model.rs on every best program, after every line.
+    #[test]
+    fn simulator_matches_model() {
+        let mut checked = 0;
+        for (input, out) in best_files() {
+            let cases = parse(&input);
+            for (c, prog) in cases.iter().zip(programs(&out)) {
+                let geo = Geo::new(&c.pattern);
+                let lines: Vec<[u8; 6]> = prog.iter().map(|&a| unpack(a)).collect();
+                let mut s = State::start(&geo);
+                for (i, &a) in prog.iter().enumerate() {
+                    s = sim::step_any(&geo, &s, a);
+                    if i % 5 == 0 || i + 1 == prog.len() {
+                        assert_eq!(s.subs as usize, count_accepted(&c.pattern, &lines[..=i]));
                     }
                 }
+                assert!(s.subs as usize >= c.count);
+                checked += 1;
             }
-            let mut full = true;
-            let mut m2 = [0u64; WORDS];
-            let mut polluted = 0i64;
-            for w in 0..self.nwords {
-                let two = c2[w] & !c3[w];
-                if prm.mode == 1 && prm.wk == 0 && two & self.kmask[w] != 0 {
-                    return None;
-                }
-                m2[w] = ((s.m[w] & !c3[w]) | two) & (self.smask[w] | self.kmask[w]);
-                if m2[w] & self.smask[w] != self.smask[w] || m2[w] & self.kmask[w] != 0 {
-                    full = false;
-                }
-                polluted += (m2[w] & self.kmask[w]).count_ones() as i64;
-            }
-            if full {
-                o.acc += 1;
-                m2 = [0u64; WORDS];
-            }
-            o.m = m2;
-            if prm.mode == 2 {
-                let n_s = self.n_s as i64;
-                let mut missing = 0i64;
-                let mut cover = 0i64;
-                for w in 0..self.nwords {
-                    let miss = self.smask[w] & !m2[w];
-                    missing += miss.count_ones() as i64;
-                    cover += (c1[w] & miss).count_ones() as i64;
-                }
-                let present = if full { 0 } else { n_s - missing };
-                let f = o.acc as i64 * (4 * n_s + 8) + 4 * present - 6 * polluted;
-                return Some((o, f * 64 + cover.min(63)));
-            }
-            // Heuristic: per unmade cell, the cheapest pair of emitters on different axes.
-            let a: [&[u8]; 6] = std::array::from_fn(|t| {
-                self.cost[(t * self.p + o.idx[t] as usize) * 2 + (o.act >> t & 1) as usize].as_slice()
-            });
-            best.fill(u8::MAX);
-            for x in 0..6 {
-                for y in x + 1..6 {
-                    if x % 3 == y % 3 {
-                        continue;
-                    }
-                    for ((b, &u), &v) in best.iter_mut().zip(a[x]).zip(a[y]) {
-                        *b = (*b).min(u.max(v));
-                    }
-                }
-            }
-            let mut unmade = 0i64;
-            let mut cost = 0i64;
-            for si in 0..self.n_s {
-                if !bit(&m2, si) {
-                    unmade += 1;
-                    cost += best[si] as i64;
-                }
-            }
-            let score = o.acc as i64 * 1_000_000_000_000 - (prm.wu * unmade + prm.wc * cost + prm.wk * polluted);
-            Some((o, score))
         }
+        eprintln!("{checked} programs checked");
+    }
 
-        fn solve(&self, count: usize, prm: &Params) -> Option<Vec<[u8; 6]>> {
-            let init = State {
-                idx: std::array::from_fn(|t| self.start[t] as u8),
-                act: 0,
-                acc: 0,
-                m: [0u64; WORDS],
-            };
-            let mut beam = vec![init];
-            let mut hist: Vec<Vec<(u32, u16)>> = Vec::new();
-            let mut best = vec![0u8; self.n_s];
+    /// Benchmark (not a test): `L6_BENCH="2-medium:0,3-large:5" L6_BENCH_W=800 cargo test --release
+    /// bench_beam -- --ignored --nocapture`. Also writes each case in beam5.c's input format to
+    /// `$L6_BENCH_DUMP/<file>_<case>.txt` (if set) for a comparison at equal width.
+    #[test]
+    #[ignore]
+    fn bench_beam() {
+        let spec = std::env::var("L6_BENCH").unwrap_or("2-medium:0".into());
+        let width: usize = std::env::var("L6_BENCH_W").ok().and_then(|v| v.parse().ok()).unwrap_or(800);
+        let dump = std::env::var("L6_BENCH_DUMP").ok();
+        for item in spec.split(',') {
+            let (file, idx) = item.split_once(':').unwrap();
+            let idx: usize = idx.parse().unwrap();
+            let input =
+                std::fs::read_to_string(Path::new(ROOT).join(format!("work/level6/in/in_level-6_{file}.txt"))).unwrap();
+            let c = &parse(&input)[idx];
+            let geo = Geo::new(&c.pattern);
+            if let Some(d) = &dump {
+                let bits = |m: &geo::Bits| -> String {
+                    (0..geo::MAXW * 64).filter(|&i| m[i / 64] >> (i % 64) & 1 == 1).map(|i| i.to_string()).collect::<Vec<_>>().join(" ")
+                };
+                let nrel = c.pattern.cells.len() + c.pattern.skirting.len();
+                let mut txt = format!("{} {} {}\n{}\n{}\n", geo.r, c.count, nrel, bits(&geo.pat), bits(&geo.halo));
+                for k in 0..6 {
+                    for o in 0..=2 * geo.r {
+                        txt += &format!("{}\n", bits(geo.beam(k, geo.pos_at(k, o))));
+                    }
+                }
+                std::fs::write(format!("{d}/{file}_{idx}.txt"), txt).unwrap();
+            }
+            let prm = beam::Params { width, ..Default::default() };
             let t0 = std::time::Instant::now();
-            for tick in 0..prm.max_ticks {
-                if t0.elapsed().as_secs_f64() > prm.max_secs {
-                    harness::trace!("TIMEOUT after {tick} ticks ({} cells, count {count})", self.n_s);
-                    return None;
-                }
-                // (score, parent, action); ties broken by (parent, action) for determinism.
-                let mut cands: Vec<(i64, u32, u16)> = Vec::with_capacity(beam.len() * 4096);
-                for (bi, st) in beam.iter().enumerate() {
-                    for act in 0..4096usize {
-                        if let Some((_, sc)) = self.apply(st, act, prm, &mut best) {
-                            cands.push((sc, bi as u32, act as u16));
-                        }
-                    }
-                }
-                if cands.is_empty() {
-                    return None;
-                }
-                let order = |x: &(i64, u32, u16), y: &(i64, u32, u16)| y.0.cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2));
-                let keep = cands.len().min(prm.width * 3);
-                if keep < cands.len() {
-                    cands.select_nth_unstable_by(keep - 1, order);
-                    cands.truncate(keep);
-                }
-                cands.sort_unstable_by(order);
-                let mut next = Vec::with_capacity(prm.width);
-                let mut h = Vec::with_capacity(prm.width);
-                let mut seen = HashSet::new();
-                for &(_, parent, act) in &cands {
-                    if next.len() >= prm.width {
-                        break;
-                    }
-                    let (ns, _) = self.apply(&beam[parent as usize], act as usize, prm, &mut best).unwrap();
-                    if seen.insert(ns) {
-                        next.push(ns);
-                        h.push((parent, act));
-                    }
-                }
-                hist.push(h);
-                beam = next;
-                if let Some(win) = beam.iter().position(|s| s.acc as usize >= count) {
-                    let mut prog = vec![[b'-'; 6]; tick + 1];
-                    let mut cur = win;
-                    for tk in (0..=tick).rev() {
-                        let (parent, act) = hist[tk][cur];
-                        for t in 0..6 {
-                            prog[tk][t] = b"-TFB"[(act as usize >> (2 * t)) & 3];
-                        }
-                        cur = parent as usize;
-                    }
-                    return Some(prog);
-                }
-            }
-            None
+            let (prog, st) = beam::search(&geo, &State::start(&geo), c.count, 999, &prm, 0, &|| false);
+            let secs = t0.elapsed().as_secs_f64();
+            println!(
+                "{file}:{idx} R={} cells={} count={} W={width}: {} lines, {secs:.3} s, {:.1} M children/s, {:.1} M leaves/s ({:.0}% of children)",
+                geo.r,
+                geo.npat,
+                c.count,
+                prog.map_or(0, |p| p.len()),
+                st.children as f64 / secs / 1e6,
+                st.leaves as f64 / secs / 1e6,
+                100.0 * st.leaves as f64 / st.children as f64
+            );
         }
     }
 
-    /// Program for one case, or None when the pattern is too big for the bitsets or the search dies.
-    pub fn solve_case(c: &Case, prm: &Params) -> Option<Vec<[u8; 6]>> {
-        Solver::new(c)?.solve(c.count, prm)
+    #[test]
+    fn beam_solves_example() {
+        let input = std::fs::read_to_string(Path::new(ROOT).join("work/level6/in/in_level-6_0-example.txt")).unwrap();
+        for c in parse(&input) {
+            let geo = Geo::new(&c.pattern);
+            let (prog, _) =
+                beam::search(&geo, &State::start(&geo), c.count, 200, &beam::Params::default(), 1, &|| false);
+            let prog = prog.expect("beam finds a program");
+            let lines: Vec<[u8; 6]> = prog.iter().map(|&a| unpack(a)).collect();
+            assert!(count_accepted(&c.pattern, &lines) >= c.count);
+        }
     }
 }
