@@ -877,8 +877,8 @@ mod beam {
                 let on = parent.act >> k & 1 == 1;
                 let o = geo.offset(k, p);
                 // Moves stay inside the window (or head back into it).
-                let fwd_ok = o + 1 <= r2 || o > r2;
-                let bwd_ok = (o >= 1 && o <= r2) || o > r2;
+                let fwd_ok = o != r2;
+                let bwd_ok = o != 0;
                 let mut opts: [(u16, usize, bool); 4] = [(NOP, p, on); 4];
                 let mut nopts = 1;
                 if fwd_ok {
@@ -1118,7 +1118,7 @@ mod beam {
                     continue;
                 }
                 let r = self.rand();
-                let noise = ((r & 0xffff_ffff) * tn1 >> 32) + (((r >> 32) & 0x3f_ffff) * nz >> 22);
+                let noise = (((r & 0xffff_ffff) * tn1) >> 32) + ((((r >> 32) & 0x3f_ffff) * nz) >> 22);
                 let key = (sc + noise as i64) * 1024 + (r >> 54) as i64;
                 if key <= thr {
                     continue;
