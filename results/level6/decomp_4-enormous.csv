@@ -1,0 +1,2 @@
+case,R,count,cells,halo,best,first_best,F,Fub,W,Wub,lb_decomp,secs,log
+0,9,2,109,45,33,18,"{""1"": 10, ""2"": 17}","{""1"": 18, ""2"": 33}","{""1"": 7}","{""1"": 15}",17,351,W1@14:UNK(30s) W1@7:UNK(30s) W1@3:INF(1s) W1@5:INF(9s) W1@6:INF(28s) F1@17:UNK(30s) F1@8:INF(2s) F1@12:UNK(30s) F1@10:UNK(30s) F1@9:INF(10s) F2@32:UNK(30s) F2@24:UNK(30s) F2@20:UNK(30s) F2@18:UNK(30s) F2@17:UNK(30s)

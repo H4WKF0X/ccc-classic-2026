@@ -40,17 +40,29 @@ def save_program(lg, states, count):
     return n
 
 
-def pin(lg, k, free, lo, ub, secs, workers, log, count=None, deadline=None):
+def pin(lg, k, free, lo, ub, secs, workers, log, count=None, deadline=None, climb=False):
     """Bracket min T for (k copies, free/fixed start).  lo: known lower bound, ub: known feasible T.
-    Returns (lb, ub): lb proven (all T < lb infeasible), ub feasible."""
+    Returns (lb, ub): lb proven (all T < lb infeasible), ub feasible.
+    Default strategy: probe ub-1 (one INFEASIBLE proves ub optimal), then bisect.
+    climb=True: probe ub-1 with a quarter of the time, then walk up from lo (T = lo, lo+1, ...):
+    proofs far below the optimum are cheap, so this gets the most out of a fixed budget on
+    hard cases where bisection's middle probes all time out."""
     cap = ub            # smallest T known to be feasible or undecided: only T < cap is tested
-    descend = True      # first walk down from ub (one INFEASIBLE proves ub optimal), then bisect
+    descend = True      # first walk down from ub (one INFEASIBLE proves ub optimal)
+    up = False          # climbing phase
     while lo < cap:
         left = secs if deadline is None else min(secs, deadline - time.time())
         if left < 2:
             log.append('BUDGET')
             break
-        T = cap - 1 if descend else (lo + cap - 1) // 2
+        if descend:
+            T = cap - 1
+            if climb:
+                left = max(2, left / 4)
+        elif up:
+            T = lo
+        else:
+            T = (lo + cap - 1) // 2
         t0 = time.time()
         st, states = satmodel.solve(lg, T, k, free_start=free, secs=left, workers=workers)
         log.append(f"{'W' if free else 'F'}{k}@{T}:{st[:3]}({time.time() - t0:.0f}s)")
@@ -62,7 +74,11 @@ def pin(lg, k, free, lo, ub, secs, workers, log, count=None, deadline=None):
             ub = cap = T
         else:
             cap = T
-            descend = False
+            if up:
+                break           # climbing hit its limit: stop
+            if descend:
+                descend = False
+                up = climb
     return lo, ub
 
 
@@ -74,7 +90,9 @@ def chain(W, m):
     return B[m]
 
 
-def case_bounds(lg, prog, count, secs, workers, fmax, wmax, budget=None):
+def case_bounds(lg, prog, count, secs, workers, fmax, wmax, budget=None, climb=False, prev=None):
+    """prev: an earlier row of this case -- its proven bounds are the starting brackets."""
+    pv = {n: {int(a): b for a, b in json.loads(prev[n]).items()} for n in ('F', 'Fub', 'W', 'Wub')} if prev else None
     deadline = None if budget is None else time.time() + budget
     ts = det_ticks_of(lg.geo, prog)[:count]
     gaps = [b - a for a, b in zip(ts, ts[1:])]
@@ -86,12 +104,16 @@ def case_bounds(lg, prog, count, secs, workers, fmax, wmax, budget=None):
         if k <= min(wmax, count - 1):
             ub = min(sum(gaps[s:s + k]) for s in range(len(gaps) - k + 1))
             lo = max([k] + [W[j] + W[k - j] for j in range(1, k)])
-            W[k], Wub[k] = pin(lg, k, True, lo, ub, secs, workers, log, deadline=deadline)
+            if pv and k in pv['W']:
+                lo, ub = max(lo, pv['W'][k]), min(ub, pv['Wub'][k])
+            W[k], Wub[k] = pin(lg, k, True, lo, ub, secs, workers, log, deadline=deadline, climb=climb)
         j = step
         if j <= min(fmax, count):
             ub = ts[j - 1]
             lo = max([j] + ([F[j - 1] + W.get(1, 1)] if j > 1 else []))
-            F[j], Fub[j] = pin(lg, j, False, lo, ub, secs, workers, log, count, deadline)
+            if pv and j in pv['F']:
+                lo, ub = max(lo, pv['F'][j]), min(ub, pv['Fub'][j])
+            F[j], Fub[j] = pin(lg, j, False, lo, ub, secs, workers, log, count, deadline, climb)
     lb = 0
     for j in range(0, len(F) + 1):
         fj = F[j] if j else 0
@@ -107,14 +129,20 @@ def main():
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--fmax', type=int, default=2)
     ap.add_argument('--wmax', type=int, default=3)
+    ap.add_argument('--climb', action='store_true', help='climb from the lower bound (hard cases)')
+    ap.add_argument('--redo', action='store_true', help='re-run cases already in the CSV (new row wins)')
     ap.add_argument('--budget', type=float, default=None, help='max seconds per case (all solves)')
     A = ap.parse_args()
     cases, best = load(A.key)
     idx = range(len(cases)) if A.cases == 'all' else [int(v) for v in A.cases.split(',')]
     path = os.path.join(RES, f'decomp_{A.key}.csv')
-    done = set()
+    done, prev = set(), {}
     if os.path.exists(path):
-        done = {int(r['case']) for r in csv.DictReader(open(path))}
+        for r in csv.DictReader(open(path)):
+            prev[int(r['case'])] = r
+        done = set(prev)
+    if A.redo:
+        done = set()
     new = not os.path.exists(path)
     f = open(path, 'a', newline='')
     w = csv.writer(f)
@@ -129,7 +157,8 @@ def main():
         t0 = time.time()
         global SAVE
         SAVE = (A.key, i)
-        res = case_bounds(lg, best[i], c, A.secs, A.workers, A.fmax, A.wmax, A.budget)
+        res = case_bounds(lg, best[i], c, A.secs, A.workers, A.fmax, A.wmax, A.budget, A.climb,
+                          prev.get(i) if A.redo else None)
         assert res['lb'] <= len(best[i]), (i, res)       # a bound above a real program = bug
         w.writerow([i, r, c, len(lg.S), len(lg.K), len(best[i]), res['first'], json.dumps(res['F']),
                     json.dumps(res['Fub']), json.dumps(res['W']), json.dumps(res['Wub']), res['lb'],
