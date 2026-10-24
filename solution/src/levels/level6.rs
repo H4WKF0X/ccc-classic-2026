@@ -484,6 +484,8 @@ mod beam {
         pub children: u64,
         /// Beam combinations evaluated (matter update + scoring).
         pub leaves: u64,
+        /// Inner nodes of the depth-first enumeration.
+        pub nodes: u64,
     }
 
     /// Runs one attempt. `abort` is polled every tick. Returns the lines after `start`.
@@ -512,6 +514,13 @@ mod beam {
     /// 1024 plus random tie-break bits.
     const COPY_SCORE: i64 = 10_000_000;
     const NO_BEAM: u32 = u32::MAX;
+    const EMPTY_SLOT: u32 = u32::MAX;
+    /// The pool is compacted to the best `keep` whenever it reaches this size. Compacting often
+    /// keeps the global threshold tight, which prunes most of the expansion.
+    fn pool_cap(keep: usize) -> usize {
+        (keep + keep / 2).max(2048)
+    }
+
     /// The beam of an option that fires nothing.
     static ZERO: Bits = [0; MAXW];
 
@@ -630,7 +639,8 @@ mod beam {
         // --- per tick ---
         pool: Vec<Cand>,
         pool_thr: i64,
-        seen: Vec<u64>,
+        /// Open-addressing index of `pool` by state hash (duplicates are merged on insertion).
+        slots: Vec<u32>,
     }
 
     impl<'g, const NW: usize> Search<'g, NW> {
@@ -661,9 +671,9 @@ mod beam {
                 minpen: [0; 7],
                 local: TopK { heap: Vec::with_capacity(prm.kcap), cap: prm.kcap.max(1) },
                 found: None,
-                pool: Vec::with_capacity(8 * keep + 64),
+                pool: Vec::with_capacity(pool_cap(keep) + prm.kcap),
                 pool_thr: i64::MIN,
-                seen: vec![0; (4 * keep).next_power_of_two()],
+                slots: vec![EMPTY_SLOT; (2 * (pool_cap(keep) + prm.kcap)).next_power_of_two()],
             }
         }
 
@@ -700,7 +710,7 @@ mod beam {
         #[inline(always)]
         fn run_impl(mut self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
             let keep = self.prm.pool * self.prm.width;
-            let cap = (keep + keep / 2).max(2048);
+            let cap = pool_cap(keep);
             let mut cur = vec![*start];
             // hist[t][i] = (parent index at tick t, line) of state i after tick t + 1.
             let mut hist: Vec<Vec<(u32, Action)>> = Vec::new();
@@ -712,6 +722,7 @@ mod beam {
                 }
                 self.stats.ticks = tick + 1;
                 self.pool.clear();
+                self.slots.fill(EMPTY_SLOT);
                 self.pool_thr = i64::MIN;
                 for (pi, parent) in cur.iter().enumerate() {
                     self.expand(parent);
@@ -725,9 +736,10 @@ mod beam {
                         prog.reverse();
                         return (Some(prog), self.stats);
                     }
-                    for &(key, code) in &self.local.heap {
+                    for i in 0..self.local.heap.len() {
+                        let (key, code) = self.local.heap[i];
                         let child = sim::step::<NW>(self.geo, parent, code);
-                        self.pool.push(Cand { key, hash: hash::<NW>(self.geo, &child), parent: pi as u32, code });
+                        self.insert(Cand { key, hash: hash::<NW>(self.geo, &child), parent: pi as u32, code });
                     }
                     if self.pool.len() >= cap {
                         self.compact(keep);
@@ -757,34 +769,45 @@ mod beam {
             (None, self.stats)
         }
 
-        /// Sorts the pool by score, drops duplicate states, keeps the best `keep`.
-        fn compact(&mut self, keep: usize) {
-            self.pool.sort_unstable_by(|a, b| b.key.cmp(&a.key).then(a.hash.cmp(&b.hash)));
-            self.seen.fill(0);
-            let mask = self.seen.len() - 1;
-            let mut n = 0;
-            for i in 0..self.pool.len() {
-                if n == keep {
-                    break;
-                }
-                let h = self.pool[i].hash | 1;
-                let mut j = (h >> 7) as usize & mask;
-                let dup = loop {
-                    match self.seen[j] {
-                        0 => break false,
-                        x if x == h => break true,
-                        _ => j = (j + 1) & mask,
+        /// Adds a child to the pool, or improves the key of the same state already in it.
+        #[inline(always)]
+        fn insert(&mut self, c: Cand) {
+            let mask = self.slots.len() - 1;
+            let mut j = (c.hash >> 7) as usize & mask;
+            loop {
+                match self.slots[j] {
+                    EMPTY_SLOT => {
+                        self.slots[j] = self.pool.len() as u32;
+                        self.pool.push(c);
+                        return;
                     }
-                };
-                if !dup {
-                    self.seen[j] = h;
-                    self.pool[n] = self.pool[i];
-                    n += 1;
+                    i if self.pool[i as usize].hash == c.hash => {
+                        if c.key > self.pool[i as usize].key {
+                            self.pool[i as usize] = c;
+                        }
+                        return;
+                    }
+                    _ => j = (j + 1) & mask,
                 }
             }
-            self.pool.truncate(n);
-            if n == keep {
-                self.pool_thr = self.pool[n - 1].key;
+        }
+
+        /// Keeps the best `keep` states of the pool (all distinct already) and raises the pool
+        /// threshold to the worst kept key.
+        fn compact(&mut self, keep: usize) {
+            if self.pool.len() > keep {
+                self.pool.select_nth_unstable_by(keep - 1, |a, b| b.key.cmp(&a.key).then(a.hash.cmp(&b.hash)));
+                self.pool.truncate(keep);
+                self.pool_thr = self.pool[keep - 1].key;
+            }
+            self.slots.fill(EMPTY_SLOT);
+            let mask = self.slots.len() - 1;
+            for (i, c) in self.pool.iter().enumerate() {
+                let mut j = (c.hash >> 7) as usize & mask;
+                while self.slots[j] != EMPTY_SLOT {
+                    j = (j + 1) & mask;
+                }
+                self.slots[j] = i as u32;
             }
         }
 
@@ -955,6 +978,7 @@ mod beam {
                 }
                 let grp = self.groups[e][next[l]];
                 next[l] += 1;
+                self.stats.nodes += 1;
                 let b = self.geo.beam.get(grp.beam as usize).unwrap_or(&ZERO);
                 let mut bad = 0;
                 for w in 0..NW {
@@ -1512,7 +1536,7 @@ mod tests {
             let secs = t0.elapsed().as_secs_f64();
             let fp = prog.as_ref().map_or(0, |p| p.iter().fold(0u64, |h, &a| opt::mix(h ^ a as u64)));
             println!(
-                "{file}:{idx} R={} cells={} count={} W={width}: {} lines ({fp:016x}), {secs:.3} s, {} ticks, {:.1} M nominal children/s, scored {:.0}%, leaves {:.0}%",
+                "{file}:{idx} R={} cells={} count={} W={width}: {} lines ({fp:016x}), {secs:.3} s, {} ticks, {:.1} M nominal children/s, scored {:.0}%, leaves {:.0}%, nodes {:.0}%",
                 geo.r,
                 geo.npat,
                 c.count,
@@ -1521,6 +1545,7 @@ mod tests {
                 st.nominal as f64 / secs / 1e6,
                 100.0 * st.children as f64 / st.nominal as f64,
                 100.0 * st.leaves as f64 / st.nominal as f64,
+                100.0 * st.nodes as f64 / st.nominal as f64,
             );
         }
     }
