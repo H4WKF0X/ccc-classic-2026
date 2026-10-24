@@ -25,16 +25,37 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 RES = os.path.join(ROOT, 'results', 'level6')
 
 
-def pin(lg, k, free, lo, ub, secs, workers, log):
+SAVE = None   # set to (key, case, count) by main(): shorter full programs found are written out
+
+
+def save_program(lg, states, count):
+    from lines import program_from_states
+    prog = program_from_states(lg, states[1:])
+    n = simulate(lg.geo, prog, count)
+    assert n is not None and n <= len(prog), 'model solution does not replay'
+    key, case = SAVE
+    os.makedirs(os.path.join(RES, 'exact_programs'), exist_ok=True)
+    with open(os.path.join(RES, 'exact_programs', f'{key}_{case}.txt'), 'w') as o:
+        o.write('\n'.join(' '.join(l) for l in prog[:n]) + '\n')
+    return n
+
+
+def pin(lg, k, free, lo, ub, secs, workers, log, count=None, deadline=None):
     """Bracket min T for (k copies, free/fixed start).  lo: known lower bound, ub: known feasible T.
     Returns (lb, ub): lb proven (all T < lb infeasible), ub feasible."""
     cap = ub            # smallest T known to be feasible or undecided: only T < cap is tested
     descend = True      # first walk down from ub (one INFEASIBLE proves ub optimal), then bisect
     while lo < cap:
+        left = secs if deadline is None else min(secs, deadline - time.time())
+        if left < 2:
+            log.append('BUDGET')
+            break
         T = cap - 1 if descend else (lo + cap - 1) // 2
         t0 = time.time()
-        st, _ = satmodel.solve(lg, T, k, free_start=free, secs=secs, workers=workers)
+        st, states = satmodel.solve(lg, T, k, free_start=free, secs=left, workers=workers)
         log.append(f"{'W' if free else 'F'}{k}@{T}:{st[:3]}({time.time() - t0:.0f}s)")
+        if states and not free and k == count and SAVE:
+            log.append(f'SAVED:{save_program(lg, states, count)}')
         if st == 'INFEASIBLE':
             lo = T + 1
         elif st == 'FEASIBLE':
@@ -53,19 +74,24 @@ def chain(W, m):
     return B[m]
 
 
-def case_bounds(lg, prog, count, secs, workers, fmax, wmax):
+def case_bounds(lg, prog, count, secs, workers, fmax, wmax, budget=None):
+    deadline = None if budget is None else time.time() + budget
     ts = det_ticks_of(lg.geo, prog)[:count]
     gaps = [b - a for a, b in zip(ts, ts[1:])]
     log = []
     W, Wub, F, Fub = {}, {}, {}, {}
-    for k in range(1, min(wmax, count - 1) + 1):
-        ub = min(sum(gaps[s:s + k]) for s in range(len(gaps) - k + 1))
-        lo = max([k] + [W[j] + W[k - j] for j in range(1, k)])
-        W[k], Wub[k] = pin(lg, k, True, lo, ub, secs, workers, log)
-    for j in range(1, min(fmax, count) + 1):
-        ub = ts[j - 1]
-        lo = max([j] + [F[j - 1] + W.get(1, 1)] if j > 1 else [j])
-        F[j], Fub[j] = pin(lg, j, False, lo, ub, secs, workers, log)
+    # interleave W1, F1, W2, F2, ... so a time budget is spent on the most useful numbers first
+    for step in range(1, max(wmax, fmax) + 1):
+        k = step
+        if k <= min(wmax, count - 1):
+            ub = min(sum(gaps[s:s + k]) for s in range(len(gaps) - k + 1))
+            lo = max([k] + [W[j] + W[k - j] for j in range(1, k)])
+            W[k], Wub[k] = pin(lg, k, True, lo, ub, secs, workers, log, deadline=deadline)
+        j = step
+        if j <= min(fmax, count):
+            ub = ts[j - 1]
+            lo = max([j] + ([F[j - 1] + W.get(1, 1)] if j > 1 else []))
+            F[j], Fub[j] = pin(lg, j, False, lo, ub, secs, workers, log, count, deadline)
     lb = 0
     for j in range(0, len(F) + 1):
         fj = F[j] if j else 0
@@ -81,6 +107,7 @@ def main():
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--fmax', type=int, default=2)
     ap.add_argument('--wmax', type=int, default=3)
+    ap.add_argument('--budget', type=float, default=None, help='max seconds per case (all solves)')
     A = ap.parse_args()
     cases, best = load(A.key)
     idx = range(len(cases)) if A.cases == 'all' else [int(v) for v in A.cases.split(',')]
@@ -100,7 +127,9 @@ def main():
         r, g, c = cases[i]
         lg = LineGeo(r, g)
         t0 = time.time()
-        res = case_bounds(lg, best[i], c, A.secs, A.workers, A.fmax, A.wmax)
+        global SAVE
+        SAVE = (A.key, i)
+        res = case_bounds(lg, best[i], c, A.secs, A.workers, A.fmax, A.wmax, A.budget)
         assert res['lb'] <= len(best[i]), (i, res)       # a bound above a real program = bug
         w.writerow([i, r, c, len(lg.S), len(lg.K), len(best[i]), res['first'], json.dumps(res['F']),
                     json.dumps(res['Fub']), json.dumps(res['W']), json.dumps(res['Wub']), res['lb'],

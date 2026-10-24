@@ -32,8 +32,9 @@ def window_extra(T, copies, end_cfg):
     return extra
 
 
-def improve_case(lg, prog, count, maxlen, secs, workers, log):
+def improve_case(lg, prog, count, maxlen, secs, workers, log, on_improve=None):
     """Repeat: try every window (shortest first); splice the first improvement; until none."""
+    proven = set()      # windows (start cfg, end cfg, copies, length) already proven optimal
     changed = True
     while changed:
         changed = False
@@ -50,10 +51,15 @@ def improve_case(lg, prog, count, maxlen, secs, workers, log):
                 continue
             start = None if i == 0 else st[cut[i]]
             end = None if j == count else st[cut[j]]
+            key = (repr(start), repr(end), j - i, L)
+            if key in proven:
+                continue
             t0 = time.time()
             s, states = satmodel.solve(lg, L - 1, j - i, start_cfg=start, secs=secs, workers=workers,
                                        symbreak=False, extra=window_extra(L - 1, j - i, end))
             log(f'  window {i}->{j} len {L}: {s} ({time.time() - t0:.0f}s)')
+            if s == 'INFEASIBLE':
+                proven.add(key)
             if states:
                 # rebuild the window as instructions, starting from its own start state
                 sub = _instructions(lg, states)
@@ -62,6 +68,8 @@ def improve_case(lg, prog, count, maxlen, secs, workers, log):
                 if n is not None and n < len(prog):
                     log(f'  -> spliced: {len(prog)} -> {n}')
                     prog = new[:n]
+                    if on_improve:
+                        on_improve(prog)
                     changed = True
                     break
                 log(f'  -> splice did not verify (n={n})')
@@ -106,10 +114,10 @@ def main():
             assert simulate(lg.geo, prog, c) == len(prog)
         b0 = len(prog)
         print(f'{A.key} case {i} R={r} n={c} start {b0} (best file {len(best[i])})', flush=True)
-        new = improve_case(lg, prog, c, A.maxlen, A.secs, A.workers, lambda s: print(s, flush=True))
-        if len(new) < b0:
+        def save(p, src=src):
             with open(src, 'w') as o:
-                o.write('\n'.join(' '.join(l) for l in new) + '\n')
+                o.write('\n'.join(' '.join(l) for l in p) + '\n')
+        new = improve_case(lg, prog, c, A.maxlen, A.secs, A.workers, lambda s: print(s, flush=True), save)
         print(f'{A.key} case {i}: {len(best[i])} -> {len(new)}', flush=True)
 
 

@@ -11,7 +11,9 @@ usage: python3 collect.py
 """
 import csv, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lines import KEYS, LineGeo, load
+from lines import KEYS, LineGeo, load, simulate
+from multi_cycles import det_ticks_of
+from bounds import chain
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RES = os.path.join(ROOT, 'results', 'level6')
@@ -42,34 +44,49 @@ def main():
                 opt = lb == b
             d = de.get(i)
             F = W = ''
+            first = det_ticks_of(lg.geo, p)[0]
+            first_lb = rest_lb = ''
             if d:
                 F, W = d['F'], d['W']
+                Fd = {int(k): v for k, v in json.loads(F).items()}
+                Wd = {int(k): v for k, v in json.loads(W).items()}
+                first_lb = Fd.get(1, '')
+                rest_lb = chain(Wd, c - 1) if Wd else (0 if c == 1 else '')
                 if int(d['lb_decomp']) > lb:
                     lb, how = int(d['lb_decomp']), 'decomp'
                     opt = lb == b
-            assert lb <= b, (key, i, lb, b)
-            found = e['found'] if e and e['found'] else ''
+            found = ''
+            for src in (os.path.join(RES, 'exact_programs', f'{key}_{i}.txt'),
+                        os.path.join(RES, 'improved', f'{key}_{i}.txt')):
+                if os.path.exists(src):
+                    q = [l.split() for l in open(src) if l.strip()]
+                    if simulate(lg.geo, q, c) == len(q) and len(q) < b and (found == '' or len(q) < found):
+                        found = len(q)
+            nb = found if found != '' else b          # best known after this research
+            assert lb <= nb, (key, i, lb, nb)         # a bound above a real program = bug
+            opt = lb == nb
             out.append(dict(file=key, case=i, R=r, count=c, cells=len(lg.S), halo=len(lg.K), best=b, lb=lb,
-                            gap=b - lb, proven_optimal=int(opt), method=how,
+                            best_new=nb, gap=nb - lb, proven_optimal=int(opt), method=how,
                             exact_status=e['status'] if e else '', exact_secs=e['secs'] if e else '',
-                            shorter_found=found, F_lb=F, W_lb=W))
+                            shorter_found=found, F_lb=F, W_lb=W, first_best=first,
+                            first_lb=first_lb, rest_best=b - first, rest_lb=rest_lb))
     path = os.path.join(RES, 'bounds.csv')
     with open(path, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(out[0]))
         w.writeheader()
         w.writerows(out)
-    print(f'{"file":12s} {"cases":>5s} {"best":>6s} {"lb":>6s} {"gap":>5s} {"optimal":>8s}')
-    for key in KEYS:
-        rs = [o for o in out if o['file'] == key]
-        print(f'{key:12s} {len(rs):5d} {sum(o["best"] for o in rs):6d} {sum(o["lb"] for o in rs):6d} '
-              f'{sum(o["gap"] for o in rs):5d} {sum(o["proven_optimal"] for o in rs):8d}')
-    sc = [o for o in out if o['file'] != '1-small']
-    print(f'{"scored":12s} {len(sc):5d} {sum(o["best"] for o in sc):6d} {sum(o["lb"] for o in sc):6d} '
-          f'{sum(o["gap"] for o in sc):5d} {sum(o["proven_optimal"] for o in sc):8d}')
+    hdr = f'{"file":12s} {"cases":>5s} {"best":>6s} {"new":>6s} {"lb":>6s} {"gap":>5s} {"optimal":>8s}'
+    print(hdr)
+    groups = [(k, [o for o in out if o['file'] == k]) for k in KEYS]
+    groups.append(('scored', [o for o in out if o['file'] != '1-small']))
+    for key, rs in groups:
+        print(f'{key:12s} {len(rs):5d} {sum(o["best"] for o in rs):6d} {sum(o["best_new"] for o in rs):6d} '
+              f'{sum(o["lb"] for o in rs):6d} {sum(o["gap"] for o in rs):5d} '
+              f'{sum(o["proven_optimal"] for o in rs):8d}')
     print('largest gaps:')
     for o in sorted(out, key=lambda o: -o['gap'])[:25]:
         print(f"  {o['file']} case {o['case']:3d} R={o['R']} n={o['count']} cells={o['cells']} "
-              f"best={o['best']} lb={o['lb']} gap={o['gap']} ({o['method']})")
+              f"best={o['best_new']} lb={o['lb']} gap={o['gap']} ({o['method']})")
     print(f'wrote {path}')
 
 
