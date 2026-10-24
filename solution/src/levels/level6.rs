@@ -276,7 +276,7 @@ mod sim {
     }
 
     /// One tick: instructions, beams, matter rules, copy detection. `NW` = bitset words in use.
-    #[inline]
+    #[inline(always)]
     pub fn step<const NW: usize>(geo: &Geo, s: &State, a: Action) -> State {
         let mut t = *s;
         let (mut c1, mut c2, mut c3) = ([0u64; NW], [0u64; NW], [0u64; NW]);
@@ -424,7 +424,7 @@ mod sym {
 /// depth-first with shared prefixes: emitter `k`'s beam is added to the hit counters of the
 /// first `k` emitters (bitsets for >=1, >=2, >=3 hits).
 mod beam {
-    use super::geo::{EMPTY, Geo};
+    use super::geo::{Bits, EMPTY, Geo, MAXW};
     use super::sim::{self, State};
     use super::{Action, BWD, FWD, NOP, TOGGLE};
 
@@ -462,7 +462,9 @@ mod beam {
     #[derive(Clone, Copy, Debug, Default)]
     pub struct Stats {
         pub ticks: usize,
-        /// Children (instruction lines) considered.
+        /// Children (instruction lines) of all expanded states: the work of a plain expansion.
+        pub nominal: u64,
+        /// Children (instruction lines) scored.
         pub children: u64,
         /// Beam combinations evaluated (matter update + scoring).
         pub leaves: u64,
@@ -494,8 +496,53 @@ mod beam {
     /// 1024 plus random tie-break bits.
     const COPY_SCORE: i64 = 10_000_000;
     const NO_BEAM: u32 = u32::MAX;
-    /// Local candidate buffer is cut back to `kcap` whenever it reaches this size.
-    const LOCAL_LIMIT: usize = 256;
+    /// The beam of an option that fires nothing.
+    static ZERO: Bits = [0; MAXW];
+
+    /// The `cap` largest (key, line) pairs pushed so far, as a binary min-heap.
+    struct TopK {
+        heap: Vec<(i64, Action)>,
+        cap: usize,
+    }
+
+    impl TopK {
+        /// Keys at or below this cannot enter any more.
+        #[inline(always)]
+        fn threshold(&self) -> i64 {
+            if self.heap.len() < self.cap { i64::MIN } else { self.heap[0].0 }
+        }
+
+        #[inline(always)]
+        fn push(&mut self, item: (i64, Action)) {
+            let h = &mut self.heap;
+            if h.len() < self.cap {
+                h.push(item);
+                let mut i = h.len() - 1;
+                while i > 0 && h[(i - 1) / 2].0 > h[i].0 {
+                    h.swap(i, (i - 1) / 2);
+                    i = (i - 1) / 2;
+                }
+            } else if item.0 > h[0].0 {
+                h[0] = item;
+                let mut i = 0;
+                loop {
+                    let (l, r) = (2 * i + 1, 2 * i + 2);
+                    let mut m = i;
+                    if l < h.len() && h[l].0 < h[m].0 {
+                        m = l;
+                    }
+                    if r < h.len() && h[r].0 < h[m].0 {
+                        m = r;
+                    }
+                    if m == i {
+                        break;
+                    }
+                    h.swap(i, m);
+                    i = m;
+                }
+            }
+        }
+    }
 
     /// One option of one emitter: its instruction (already shifted into place) and penalty.
     #[derive(Clone, Copy, Default)]
@@ -511,9 +558,11 @@ mod beam {
         beam: u32,
         n: usize,
         vars: [Variant; 4],
+        /// Smallest penalty among `vars`.
+        min_pen: i32,
     }
 
-    const NO_GROUP: Group = Group { beam: NO_BEAM, n: 0, vars: [Variant { code: 0, pen: 0 }; 4] };
+    const NO_GROUP: Group = Group { beam: NO_BEAM, n: 0, vars: [Variant { code: 0, pen: 0 }; 4], min_pen: 0 };
 
     /// A child that survived its parent's cap: score, state hash, where it came from.
     #[derive(Clone, Copy)]
@@ -536,20 +585,30 @@ mod beam {
         // --- per parent ---
         m: [u64; NW],
         subs: u8,
+        /// Option groups per emitter.
         groups: [[Group; 4]; 6],
         ngroups: [usize; 6],
-        /// `reach[k]`: every cell some option of emitters `k..6` could still hit.
+        /// Emitters in search order: fewest groups first, so the fused last level does most work.
+        order: [usize; 6],
+        /// Halo matter is possible (allowed by `hp`, or already in the parent).
+        junk_possible: bool,
+        /// `reach[l]`: every cell some option of the emitters at levels `l..6` could still hit;
+        /// `reach2[l]`: cells two different such emitters could hit.
         reach: [[u64; NW]; 7],
+        reach2: [[u64; NW]; 7],
+        /// `rest_pen[l]`: the smallest total penalty of the emitters at levels `l..6`.
+        rest_pen: [i32; 7],
         /// Hit counters after the first `k` emitters: >=1, >=2, >=3 beams.
         c1: [[u64; NW]; 7],
         c2: [[u64; NW]; 7],
         c3: [[u64; NW]; 7],
-        /// Variant lists: `vars[l][..nvars[l]]` = (code, penalty) combinations built at level `l`.
+        /// Variant lists: `vars[l][..nvars[l]]` = (code, penalty) combinations built at level `l`,
+        /// `minpen[l]` = their smallest penalty.
         vars: Vec<[(u16, i32); 4096]>,
         nvars: [usize; 7],
-        /// Children of the current parent that may make its top `kcap`: (key, code).
-        local: Vec<(i64, u16)>,
-        local_thr: i64,
+        minpen: [i32; 7],
+        /// The current parent's best `kcap` children: (key, line).
+        local: TopK,
         found: Option<Action>,
 
         // --- per tick ---
@@ -573,14 +632,18 @@ mod beam {
                 subs: 0,
                 groups: [[NO_GROUP; 4]; 6],
                 ngroups: [0; 6],
+                order: [0, 1, 2, 3, 4, 5],
+                junk_possible: false,
                 reach: [[0; NW]; 7],
+                reach2: [[0; NW]; 7],
+                rest_pen: [0; 7],
                 c1: [[0; NW]; 7],
                 c2: [[0; NW]; 7],
                 c3: [[0; NW]; 7],
                 vars: vec![[(0, 0); 4096]; 7],
                 nvars: [0; 7],
-                local: Vec::with_capacity(LOCAL_LIMIT + 4096),
-                local_thr: i64::MIN,
+                minpen: [0; 7],
+                local: TopK { heap: Vec::with_capacity(prm.kcap), cap: prm.kcap.max(1) },
                 found: None,
                 pool: Vec::with_capacity(8 * keep + 64),
                 pool_thr: i64::MIN,
@@ -588,6 +651,7 @@ mod beam {
             }
         }
 
+        #[inline(always)]
         fn rand(&mut self) -> u64 {
             self.rng ^= self.rng << 13;
             self.rng ^= self.rng >> 7;
@@ -595,9 +659,32 @@ mod beam {
             self.rng
         }
 
-        fn run(mut self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
+        /// Runs the attempt, compiled for the best instruction set this CPU has.
+        fn run(self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
+            #[cfg(target_arch = "x86_64")]
+            if std::arch::is_x86_feature_detected!("avx2")
+                && std::arch::is_x86_feature_detected!("popcnt")
+                && std::arch::is_x86_feature_detected!("bmi1")
+                && std::arch::is_x86_feature_detected!("lzcnt")
+            {
+                // SAFETY: the CPU supports every feature `run_x86_v3` is compiled for.
+                return unsafe { self.run_x86_v3(start, max_ticks, abort) };
+            }
+            self.run_impl(start, max_ticks, abort)
+        }
+
+        /// [`Self::run_impl`] with popcnt / BMI / AVX2 code generation (x86-64-v3).
+        #[cfg(target_arch = "x86_64")]
+        #[target_feature(enable = "avx2,popcnt,bmi1,bmi2,lzcnt")]
+        fn run_x86_v3(self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
+            self.run_impl(start, max_ticks, abort)
+        }
+
+        /// The tick loop: expand every state, keep the best `width` distinct children.
+        #[inline(always)]
+        fn run_impl(mut self, start: &State, max_ticks: usize, abort: &dyn Fn() -> bool) -> (Option<Vec<Action>>, Stats) {
             let keep = self.prm.pool * self.prm.width;
-            let cap = 8 * keep.max(1024);
+            let cap = (keep + keep / 2).max(2048);
             let mut cur = vec![*start];
             // hist[t][i] = (parent index at tick t, line) of state i after tick t + 1.
             let mut hist: Vec<Vec<(u32, Action)>> = Vec::new();
@@ -622,7 +709,7 @@ mod beam {
                         prog.reverse();
                         return (Some(prog), self.stats);
                     }
-                    for &(key, code) in &self.local {
+                    for &(key, code) in &self.local.heap {
                         let child = sim::step::<NW>(self.geo, parent, code);
                         self.pool.push(Cand { key, hash: hash::<NW>(&child), parent: pi as u32, code });
                     }
@@ -687,6 +774,7 @@ mod beam {
 
         /// Tail heuristic: once few pattern cells are missing, each of them needs two emitters
         /// lined up; sum over missing cells of the second-closest emitter's distance (cap 6).
+        #[inline(always)]
         fn tail_penalty(&self, s: &State) -> i64 {
             let geo = self.geo;
             let missing: u32 = (0..NW).map(|w| (self.pat[w] & !s.m[w]).count_ones()).sum();
@@ -716,12 +804,14 @@ mod beam {
         }
 
         /// Builds the emitter option groups of `parent` (with their distance penalties).
+        #[inline(always)]
         fn prepare(&mut self, parent: &State) {
             let geo = self.geo;
             let r2 = 2 * geo.r;
             self.m = std::array::from_fn(|w| parent.m[w]);
             self.subs = parent.subs;
             let unpainted: [u64; NW] = std::array::from_fn(|w| self.pat[w] & !parent.m[w]);
+            let mut nominal = 1;
             for k in 0..6 {
                 // Window offsets whose beam would paint a missing pattern cell.
                 let mut useful = 0u64;
@@ -763,18 +853,31 @@ mod beam {
                             let grp = &mut self.groups[k][g];
                             grp.vars[grp.n] = var;
                             grp.n += 1;
+                            grp.min_pen = grp.min_pen.min(var.pen);
                         }
                         None => {
-                            self.groups[k][ng] = Group { beam, n: 1, vars: [var; 4] };
+                            self.groups[k][ng] = Group { beam, n: 1, vars: [var; 4], min_pen: var.pen };
                             ng += 1;
                         }
                     }
                 }
                 self.ngroups[k] = ng;
+                // Cheapest groups first: good children early raise the threshold sooner.
+                self.groups[k][..ng].sort_by_key(|g| g.min_pen);
+                nominal *= nopts as u64;
             }
+            self.junk_possible = self.prm.hp != 0 || (0..NW).any(|w| parent.m[w] & self.halo[w] != 0);
+            self.order = [0, 1, 2, 3, 4, 5];
+            let ng = self.ngroups;
+            self.order.sort_by_key(|&e| ng[e]);
+            self.stats.nominal += nominal;
             self.reach[6] = [0; NW];
-            for k in (0..6).rev() {
-                let mut u = self.reach[k + 1];
+            self.reach2[6] = [0; NW];
+            self.rest_pen[6] = 0;
+            for l in (0..6).rev() {
+                let k = self.order[l];
+                let mut u = [0; NW];
+                let mut min_pen = i32::MAX;
                 for g in &self.groups[k][..self.ngroups[k]] {
                     if g.beam != NO_BEAM {
                         let b = &geo.beam[g.beam as usize];
@@ -782,131 +885,193 @@ mod beam {
                             u[w] |= b[w];
                         }
                     }
+                    min_pen = min_pen.min(g.min_pen);
                 }
-                self.reach[k] = u;
+                for w in 0..NW {
+                    self.reach2[l][w] = self.reach2[l + 1][w] | (self.reach[l + 1][w] & u[w]);
+                    self.reach[l][w] = self.reach[l + 1][w] | u[w];
+                }
+                self.rest_pen[l] = self.rest_pen[l + 1] + min_pen;
             }
         }
 
         /// Expands one parent: fills `self.local` with its best `kcap` children (or sets `found`).
+        #[inline(always)]
         fn expand(&mut self, parent: &State) {
             self.prepare(parent);
-            self.local.clear();
-            self.local_thr = i64::MIN;
+            self.local.heap.clear();
             self.c1[0] = [0; NW];
             self.c2[0] = [0; NW];
             self.c3[0] = [0; NW];
             self.vars[0][0] = (0, 0);
             self.nvars[0] = 1;
-            self.dfs(0, 0, 0, 0);
-            if self.local.len() > self.prm.kcap {
-                let k = self.prm.kcap;
-                self.local.select_nth_unstable_by(k - 1, |a, b| b.cmp(a));
-                self.local.truncate(k);
-            }
+            self.minpen[0] = 0;
+            self.dfs();
         }
 
-        /// Depth-first over the beam groups of emitters `k..6`. The variant combinations so far
-        /// are `vars[src]`, each plus `(dcode, dpen)`.
-        fn dfs(&mut self, k: usize, src: usize, dcode: u16, dpen: i32) {
-            if k == 6 {
-                self.leaf(src, dcode, dpen);
-                return;
-            }
-            for g in 0..self.ngroups[k] {
-                if self.found.is_some() {
-                    return;
-                }
-                let grp = self.groups[k][g];
-                if grp.beam == NO_BEAM {
-                    self.c1[k + 1] = self.c1[k];
-                    self.c2[k + 1] = self.c2[k];
-                    self.c3[k + 1] = self.c3[k];
-                } else {
-                    let b = &self.geo.beam[grp.beam as usize];
-                    for w in 0..NW {
-                        let (x1, x2, x3) = (self.c1[k][w], self.c2[k][w], self.c3[k][w]);
-                        self.c3[k + 1][w] = x3 | (x2 & b[w]);
-                        self.c2[k + 1][w] = x2 | (x1 & b[w]);
-                        self.c1[k + 1][w] = x1 | b[w];
+        /// Depth-first over the beam groups, emitter `order[l]` at level `l`; level 5 is fused
+        /// with the evaluation ([`Self::last_level`]). Iterative (no recursion) so that it can
+        /// be inlined into the CPU-specific entry points. At level `l`, the variant combinations
+        /// so far are `vars[src[l]]`, each plus `(code[l], pen[l])`.
+        #[inline(always)]
+        fn dfs(&mut self) {
+            let mut next = [0usize; 6];
+            let mut src = [0usize; 6];
+            let mut code = [0u16; 6];
+            let mut pen = [0i32; 6];
+            let mut l = 0;
+            loop {
+                if l == 5 {
+                    self.last_level(src[5], code[5], pen[5]);
+                    if self.found.is_some() {
+                        return;
                     }
+                    l = 4;
+                    continue;
                 }
-                if self.prm.hp == 0 {
+                let e = self.order[l];
+                if next[l] == self.ngroups[e] {
+                    if l == 0 {
+                        return;
+                    }
+                    l -= 1;
+                    continue;
+                }
+                let grp = self.groups[e][next[l]];
+                next[l] += 1;
+                let b = self.geo.beam.get(grp.beam as usize).unwrap_or(&ZERO);
+                let mut bad = 0;
+                for w in 0..NW {
+                    let (x1, x2, x3) = (self.c1[l][w], self.c2[l][w], self.c3[l][w]);
+                    let (y2, y3) = (x2 | (x1 & b[w]), x3 | (x2 & b[w]));
+                    self.c1[l + 1][w] = x1 | b[w];
+                    self.c2[l + 1][w] = y2;
+                    self.c3[l + 1][w] = y3;
                     // A halo cell hit exactly twice that no later emitter can reach gets matter.
-                    let mut bad = 0;
-                    for w in 0..NW {
-                        bad |= self.c2[k + 1][w] & !self.c3[k + 1][w] & self.halo[w] & !self.reach[k + 1][w];
-                    }
-                    if bad != 0 {
-                        continue;
-                    }
+                    bad |= y2 & !y3 & self.halo[w] & !self.reach[l + 1][w];
+                }
+                if bad != 0 && self.prm.hp == 0 {
+                    continue;
+                }
+                if self.hopeless(l + 1, src[l], pen[l] + grp.min_pen) {
+                    continue;
                 }
                 if grp.n == 1 {
-                    let v = grp.vars[0];
-                    self.dfs(k + 1, src, dcode | v.code, dpen + v.pen);
+                    src[l + 1] = src[l];
+                    code[l + 1] = code[l] | grp.vars[0].code;
+                    pen[l + 1] = pen[l] + grp.vars[0].pen;
                 } else {
-                    let (lo, hi) = self.vars.split_at_mut(k + 1);
-                    let (from, to) = (&lo[src][..self.nvars[src]], &mut hi[0]);
+                    let (lo, hi) = self.vars.split_at_mut(l + 1);
+                    let (from, to) = (&lo[src[l]][..self.nvars[src[l]]], &mut hi[0]);
                     let mut n = 0;
                     for &(c, p) in from {
                         for v in &grp.vars[..grp.n] {
-                            to[n] = (c | dcode | v.code, p + dpen + v.pen);
+                            to[n] = (c | code[l] | v.code, p + pen[l] + v.pen);
                             n += 1;
                         }
                     }
-                    self.nvars[k + 1] = n;
-                    self.dfs(k + 1, k + 1, 0, 0);
+                    self.nvars[l + 1] = n;
+                    self.minpen[l + 1] = self.minpen[src[l]] + pen[l] + grp.min_pen;
+                    src[l + 1] = l + 1;
+                    code[l + 1] = 0;
+                    pen[l + 1] = 0;
+                }
+                next[l + 1] = 0;
+                l += 1;
+            }
+        }
+
+        /// Branch and bound: true if no child below this node (counters at level `l`, variant
+        /// list `src`, penalty so far `dpen`) can pass the current threshold, even with maximal
+        /// noise. Such children would be dropped before drawing noise, so pruning them changes
+        /// nothing. A pattern cell can end up painted only if it is not hit 3+ times yet and is
+        /// matter, hit twice, hit once with an emitter left, or reachable by two emitters left.
+        #[inline(always)]
+        fn hopeless(&self, l: usize, src: usize, dpen: i32) -> bool {
+            let thr = self.local.threshold().max(self.pool_thr);
+            if thr == i64::MIN {
+                return false;
+            }
+            let mut can = 0;
+            for w in 0..NW {
+                let (c1, c2, c3) = (self.c1[l][w], self.c2[l][w], self.c3[l][w]);
+                let open = self.m[w] | c2 | (c1 & self.reach[l][w]) | self.reach2[l][w];
+                can += (self.pat[w] & !c3 & open).count_ones();
+            }
+            if can as usize >= self.geo.npat {
+                return false; // a copy may still be completed
+            }
+            let pen = (self.minpen[src] + dpen + self.rest_pen[l]) as i64;
+            let best = self.subs as i64 * COPY_SCORE + can as i64 * self.prm.wa - pen + (self.prm.tn + self.prm.nz) as i64;
+            best * 1024 + 1023 <= thr
+        }
+
+        /// The last level, fused with the evaluation of each complete beam combination (the
+        /// "leaf"): matter update, halo rule, detection, score; then every variant is a child.
+        #[inline(always)]
+        fn last_level(&mut self, src: usize, dcode: u16, dpen: i32) {
+            let e = self.order[5];
+            for g in 0..self.ngroups[e] {
+                let grp = self.groups[e][g];
+                let b = self.geo.beam.get(grp.beam as usize).unwrap_or(&ZERO);
+                let (mut halo_hit, mut painted, mut junk) = (0u64, 0u32, 0u32);
+                for w in 0..NW {
+                    let c2 = self.c2[5][w] | (self.c1[5][w] & b[w]);
+                    let c3 = self.c3[5][w] | (self.c2[5][w] & b[w]);
+                    let two = c2 & !c3;
+                    let nm = (self.m[w] | two) & !c3;
+                    halo_hit |= two & self.halo[w];
+                    painted += (nm & self.pat[w]).count_ones();
+                    if self.junk_possible {
+                        junk += (nm & self.halo[w]).count_ones();
+                    }
+                }
+                self.stats.leaves += 1;
+                if self.prm.hp == 0 && halo_hit != 0 {
+                    continue;
+                }
+                let full = painted as usize == self.geo.npat && junk == 0;
+                let subs = self.subs as i64 + full as i64;
+                if subs as usize >= self.count {
+                    self.found = Some(self.vars[src][0].0 | dcode | grp.vars[0].code);
+                    return;
+                }
+                let painted = if full { 0 } else { painted as i64 };
+                let base = subs * COPY_SCORE + painted * self.prm.wa - junk as i64 * self.prm.hp - dpen as i64;
+                for v in 0..grp.n {
+                    let v = grp.vars[v];
+                    self.children(src, dcode | v.code, base - v.pen as i64);
                 }
             }
         }
 
-        /// One beam combination: matter update, detection, then every variant as a child.
-        #[inline]
-        fn leaf(&mut self, src: usize, dcode: u16, dpen: i32) {
-            self.stats.leaves += 1;
-            self.stats.children += self.nvars[src] as u64;
-            let (c2, c3) = (&self.c2[6], &self.c3[6]);
-            let (mut halo_hit, mut missing, mut painted, mut junk) = (0u64, 0u64, 0u32, 0u32);
-            for w in 0..NW {
-                let two = c2[w] & !c3[w];
-                let nm = (self.m[w] | two) & !c3[w];
-                halo_hit |= two & self.halo[w];
-                missing |= self.pat[w] & !nm;
-                painted += (nm & self.pat[w]).count_ones();
-                junk += (nm & self.halo[w]).count_ones();
-            }
-            if self.prm.hp == 0 && halo_hit != 0 {
-                return;
-            }
-            let full = missing == 0 && junk == 0;
-            let subs = self.subs as i64 + full as i64;
-            if subs as usize >= self.count {
-                self.found = Some(self.vars[src][0].0 | dcode);
-                return;
-            }
-            let painted = if full { 0 } else { painted as i64 };
-            let base = subs * COPY_SCORE + painted * self.prm.wa - junk as i64 * self.prm.hp - dpen as i64;
+        /// Offers the children `vars[src]` (each plus `dcode`) with score `base - penalty` to
+        /// the parent's top `kcap`.
+        #[inline(always)]
+        fn children(&mut self, src: usize, dcode: u16, base: i64) {
+            let n = self.nvars[src];
+            self.stats.children += n as u64;
             let max_noise = (self.prm.tn + self.prm.nz) as i64;
+            let mut thr = self.local.threshold().max(self.pool_thr);
+            // Even the cheapest variant with the most noise cannot make it.
+            if (base - self.minpen[src] as i64 + max_noise) * 1024 + 1023 <= thr {
+                return;
+            }
             let (tn1, nz) = (self.prm.tn as u64 + 1, self.prm.nz as u64);
-            for i in 0..self.nvars[src] {
+            for i in 0..n {
                 let (code, pen) = self.vars[src][i];
                 let sc = base - pen as i64;
-                let thr = self.local_thr.max(self.pool_thr);
-                if (sc + max_noise) * 1024 + 1023 < thr {
+                if (sc + max_noise) * 1024 + 1023 <= thr {
                     continue;
                 }
                 let r = self.rand();
                 let noise = ((r & 0xffff_ffff) * tn1 >> 32) + (((r >> 32) & 0x3f_ffff) * nz >> 22);
                 let key = (sc + noise as i64) * 1024 + (r >> 54) as i64;
-                if key < thr {
+                if key <= thr {
                     continue;
                 }
                 self.local.push((key, code | dcode));
-                if self.local.len() >= LOCAL_LIMIT {
-                    let k = self.prm.kcap;
-                    self.local.select_nth_unstable_by(k - 1, |a, b| b.cmp(a));
-                    self.local.truncate(k);
-                    self.local_thr = self.local[k - 1].0;
-                }
+                thr = self.local.threshold().max(self.pool_thr);
             }
         }
     }
@@ -927,6 +1092,7 @@ mod beam {
         d_up.min(d_down)
     }
 
+    #[inline(always)]
     fn hash<const NW: usize>(s: &State) -> u64 {
         const K: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut h = K;
@@ -1283,15 +1449,17 @@ mod tests {
             let t0 = std::time::Instant::now();
             let (prog, st) = beam::search(&geo, &State::start(&geo), c.count, 999, &prm, 0, &|| false);
             let secs = t0.elapsed().as_secs_f64();
+            let fp = prog.as_ref().map_or(0, |p| p.iter().fold(0u64, |h, &a| opt::mix(h ^ a as u64)));
             println!(
-                "{file}:{idx} R={} cells={} count={} W={width}: {} lines, {secs:.3} s, {:.1} M children/s, {:.1} M leaves/s ({:.0}% of children)",
+                "{file}:{idx} R={} cells={} count={} W={width}: {} lines ({fp:016x}), {secs:.3} s, {} ticks, {:.1} M nominal children/s, scored {:.0}%, leaves {:.0}%",
                 geo.r,
                 geo.npat,
                 c.count,
                 prog.map_or(0, |p| p.len()),
-                st.children as f64 / secs / 1e6,
-                st.leaves as f64 / secs / 1e6,
-                100.0 * st.leaves as f64 / st.children as f64
+                st.ticks,
+                st.nominal as f64 / secs / 1e6,
+                100.0 * st.children as f64 / st.nominal as f64,
+                100.0 * st.leaves as f64 / st.nominal as f64,
             );
         }
     }
