@@ -89,9 +89,8 @@ def canonicalize(lg, states, free):
         for e in range(6):
             q[e][0], o[e][0] = q[e][1], o[e][1]
     U = lg.S + lg.K
-    for e in range(6):
-        a = e % 3
-        litq = {u[a] + 1 for u in U}
+
+    def stretches(e, litq):
         lit = [o[e][t] and q[e][t] in litq for t in range(T + 1)]
         tog = [False] + [o[e][t] != o[e][t - 1] for t in range(1, T + 1)]
         t = 0
@@ -113,6 +112,22 @@ def canonicalize(lg, states, free):
                     step = min(s - a0, abs(qb - qa))
                     q[e][s] = qa + (step if qb >= qa else -step)
             t = b + 1
+
+    for e in range(6):
+        a = e % 3
+        litq = {u[a] + 1 for u in U}
+        while True:             # fixpoint of stretch rewriting and toggle/move swaps (B2, B2b)
+            stretches(e, litq)
+            changed = False
+            for t in range(1, T):
+                lit_t = o[e][t] and q[e][t] in litq
+                if (o[e][t] != o[e][t - 1] and q[e][t + 1] != q[e][t] and not lit_t
+                        and (not o[e][t - 1] or q[e][t + 1] not in litq)):
+                    q[e][t], o[e][t] = q[e][t + 1], o[e][t - 1]
+                    changed = True
+                    break
+            if not changed:
+                break
     t0 = 0 if free else 1
     best = None
     for img, rev in group(lg):

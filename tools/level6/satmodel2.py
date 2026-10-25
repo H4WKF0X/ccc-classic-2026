@@ -94,7 +94,7 @@ def _lex_leq(m, A, B):
             eq = nxt
 
 
-DEFAULT_OPTS = dict(cuts=True, canon=True, auto=True, noop=True, dettime=True)
+DEFAULT_OPTS = dict(cuts=True, canon=True, swap=True, auto=True, noop=True, dettime=True)
 
 
 def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=None, symbreak=True,
@@ -220,6 +220,16 @@ def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=Non
                         m.AddImplication(s, up[e][t].Not())
                         m.AddImplication(s, dn[e][t].Not())
                         pre = s
+                # B2b: "toggle into t, move into t+1" with both possible intermediate states unlit
+                # equals "move into t, toggle into t+1" -> keep only the move-first order
+                if o['swap']:
+                    a = e % 3
+                    for t in range(1, T):
+                        lp = m.NewBoolVar('')      # position at t+1 aims at a line touching U
+                        m.Add(lp == sum(pos[e][t + 1][l + 1] for l in used[a]))
+                        for mv in (up[e][t + 1], dn[e][t + 1]):
+                            m.AddBoolOr([tog[e][t].Not(), mv.Not(), lit[e][t], on[e][t - 1]])
+                            m.AddBoolOr([tog[e][t].Not(), mv.Not(), lit[e][t], lp])
         # B3 + B4: lex-leader for twin swaps and pattern automorphisms, one global order:
         # emitter-major, ticks t0..T, value 2q+on
         t0 = 0 if free_start else 1
@@ -299,10 +309,51 @@ def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=Non
                 for t in range(1, T + 1):
                     act[e][t] = m.NewBoolVar('')
                     m.Add(act[e][t] == up[e][t] + dn[e][t] + tog[e][t])
+            memo = {}
+
+            def both(t1, t2):
+                """6 literals: emitter e acts in both transitions (into t1 and into t2)."""
+                if (t1, t2) not in memo:
+                    bs = []
+                    for e in range(6):
+                        b = m.NewBoolVar('')
+                        m.AddBoolAnd([act[e][t1], act[e][t2]]).OnlyEnforceIf(b)
+                        m.AddBoolOr([act[e][t1].Not(), act[e][t2].Not()]).OnlyEnforceIf(b.Not())
+                        bs.append(b)
+                    memo[t1, t2] = bs
+                return memo[t1, t2]
             # tick 1 from the real start: all off, nothing fires -> an all-idle tick 1 is deletable
             if real_start:
                 m.AddBoolOr([act[e][1] for e in range(6)])
-            # same[t]: the lit beams of tick t equal those of tick t-1 (as multisets of lines)
+            # (a) effectless ticks.  diff[i] <-> matter of cell i changes in tick t.  If no cell
+            # changes and there was no detection at t-1, the state after t equals the state after
+            # t-1 (so det[t] = 0); deleting tick t and going from config t-1 straight to config t+1
+            # (one step when every emitter idles into t or into t+1) keeps every detection.
+            # With a free start an effectless tick 1 (state stays empty) is simply dropped.
+            for t in range(1, T):
+                diffs = []
+                for i in range(len(U)):
+                    d = m.NewBoolVar('')
+                    cur = mt[t, i]
+                    if t == 1:
+                        m.Add(d == cur)
+                    else:
+                        prev = mt[t - 1, i]
+                        m.AddBoolOr([cur.Not(), prev, d])
+                        m.AddBoolOr([cur, prev.Not(), d])
+                        m.AddBoolOr([d.Not(), cur, prev])
+                        m.AddBoolOr([d.Not(), cur.Not(), prev.Not()])
+                    diffs.append(d)
+                pre = [det[t - 1]] if t >= 2 else []
+                if t == 1 and free_start and start_cfg is None:
+                    m.AddBoolOr(diffs)
+                else:
+                    m.AddBoolOr(pre + diffs + both(t, t + 1))
+            # (b) repeated beams: same[t] = the lit beams of ticks t and t-1 are equal (as multisets
+            # of lines).  With no detection at t-1, tick t is effectless, and also the merged tick
+            # "config t-2 -> config t" fires exactly what tick t-1 fired, so tick t-1 can be deleted
+            # when every emitter idles into t-1 or into t.  With a free start, same[2] alone suffices
+            # (start in config 2).
             for t in range(2, T + 1):
                 eqs = []
                 for a in range(3):
@@ -316,24 +367,10 @@ def solve(lg, T, k, free_start=False, secs=60.0, workers=1, hint=None, extra=Non
                 same = m.NewBoolVar('')
                 m.AddBoolAnd(eqs).OnlyEnforceIf(same)
                 m.AddBoolOr([x.Not() for x in eqs] + [same])
-                # If same[t] and no detection at t-1, firing tick t changes nothing (idempotent) and
-                # det[t] = 0.  Then tick t can be merged into a neighbour whenever every emitter is
-                # idle in one of the two transitions involved:
-                #   with t+1: config t-1 -> config t+1 in one step;  with t-1: config t-2 -> config t.
-                # With a free start, tick 1 can always be dropped when same[2] (start in config 2).
                 if free_start and start_cfg is None and t == 2:
                     m.AddBoolOr([det[1], same.Not()])
-                    continue
-                for (t1, t2) in ((t, t + 1), (t - 1, t)):
-                    if t2 > T:
-                        continue
-                    both = []
-                    for e in range(6):
-                        b = m.NewBoolVar('')
-                        m.AddBoolAnd([act[e][t1], act[e][t2]]).OnlyEnforceIf(b)
-                        m.AddBoolOr([act[e][t1].Not(), act[e][t2].Not()]).OnlyEnforceIf(b.Not())
-                        both.append(b)
-                    m.AddBoolOr([det[t - 1], same.Not()] + both)
+                else:
+                    m.AddBoolOr([det[t - 1], same.Not()] + both(t - 1, t))
 
     V = dict(pos=pos, on=on, det=det, mt=mt, c=c, qv=qv, up=up, dn=dn, tog=tog, lit=lit, z=z)
     if extra:

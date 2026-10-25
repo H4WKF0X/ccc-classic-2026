@@ -344,3 +344,139 @@ climbing proves the cheap low horizons first and keeps the best proven bound. Me
   case, R, count, cells, halo, best, lb, best_new, gap, proven_optimal, method, F_lb, W_lb,
   first/rest split).
 * `results/level6/logs/`: raw solver logs (every probe with its status and time).
+
+## 10. Stronger model (`satmodel2.py`)
+
+`satmodel2.solve` is a drop-in for `satmodel.solve` (same arguments, same `V` for `extra`, same
+return value). Its base model (dynamics, hit counts, matter, forced detection) is the one of
+section 2, unchanged. Everything added is one of three kinds:
+
+* **A: valid cuts.** Every program satisfies them, so they never remove a program.
+* **B: dominance and symmetry.** They remove programs, but every removed program has an
+  *equivalent* one that stays: it fires exactly the same beams on pattern + halo in every tick, so
+  it has the same detections at the same ticks. They are only active with `symbreak=True` and no
+  `start_cfg`. `symbreak=False` gives the plain model plus A, which is what the fixed-trajectory
+  checks of `exact.py` and the windows of `improve.py` need.
+* **C: knowledge.** Statements about every program, derived from lower bounds that an exact model
+  has already proven. They are only active when the caller passes `known`.
+
+Why this is enough: suppose a program for the question exists. Its canonical representative
+(apply B) is a program for the same question, and it satisfies A and C because those hold for
+every program. So the model is feasible. Therefore **INFEASIBLE still proves that no program
+exists**. FEASIBLE answers are real programs and are replayed in the simulator as before.
+
+**The basic equivalence.** A cell's hit count in tick `t` depends only on the multiset of
+`(axis, line)` pairs of the emitters that are *lit* in `t`. An emitter is lit when it is on and
+aims at a line that touches pattern or halo. Matter and detection depend only on the hit counts
+of pattern and halo cells, tick by tick. So two trajectories with the same lit multisets in every
+tick `t ≥ 1` have the same detections. Which twin of an axis fires does not matter either.
+
+### 10.1 A: valid cuts
+
+* **A1: integer position.** `q_{e,t} = Σ q·pos` with `q_t − q_{t−1} = up − down`, and at most one of
+  `up`, `down`, `toggle` per tick. Each tick an emitter executes exactly one of `- T F B`. F/B is
+  one ring step, which is ±1 on the arc (section 1, fact 2; detours round the back are not needed).
+  T flips `on` without moving. This is the base transition rule written linearly, and it gives the
+  LP relaxation a move-distance argument.
+* **A2: one beam line per emitter.** `Σ_l z_{e,t,l} = lit_{e,t} ≤ 1`, where `z_{e,t,l}` = on and
+  aiming at line `l`. An emitter is at one ring position at a time.
+
+### 10.2 B: dominance and symmetry
+
+* **B1: free start, t = 0 equals t = 1.** With a free start, the configuration at `t = 0` never fires.
+  It is only the predecessor of `t = 1`. Replacing it by the configuration at `t = 1` keeps the
+  transition valid (stay, no toggle) and changes no beam.
+* **B2: unlit stretches.** A *stretch* of emitter `e` is a maximal tick interval `[a, b]` where `e` is
+  unlit in every tick and does not toggle in the transitions `a+1..b`, so `on` is constant. The
+  positions strictly inside a stretch are irrelevant. Replace them by:
+  1. the monotone path from `q_a` to `q_b` that moves first and then waits (in general);
+  2. `q_b` throughout, if `a = 0` and the start is free;
+  3. `q_a` throughout, if `b = T`.
+
+  This is valid for three reasons. (i) The new path moves at most one step per tick. It needs
+  `|q_b − q_a| ≤ b − a` steps, and the original path did that distance in the same time.
+  (ii) The ticks next to the stretch keep their positions, or there is nothing on that side (free
+  start, end of the horizon). The bordering transitions are toggles or moves out of an unchanged
+  position, so they stay legal. (iii) The emitter stays unlit. If it is off, that is trivial. If it
+  is on, the original path visited only unlit positions. An axis's unlit positions form a union of
+  intervals (the two parked ends and the lines that miss pattern + halo), so `q_a` and `q_b` lie in
+  one interval, and the monotone path stays inside it. The rewrite does not change which ticks are
+  lit or which transitions are toggles, so every stretch can be rewritten independently.
+
+  The rewritten trajectory satisfies these local rules, which is what the model enforces:
+  (R1) no reversal and (R2) no wait followed by a move, in every window `t−1, t, t+1` that is unlit
+  with no toggle into `t` or `t+1`; (R3) no move inside a stretch that reaches `T`; (R4) with a free
+  start, no move inside a stretch that starts at `0`. R1 and R2 together say: inside a stretch,
+  the moves are a monotone prefix followed by waits.
+* **B2b: move before toggle.** Take "toggle into `t`, then move into `t+1`" where tick `t` is unlit
+  and the other possible intermediate state `(q_{t+1}, on_{t−1})` is unlit too. That is the case
+  when the emitter was off before, or when `q_{t+1}` misses pattern + halo. Then "move into `t`,
+  toggle into `t+1`" reaches the same state at `t+1` with an unlit tick `t`, so it fires the same
+  beams. The model keeps only the move-first order.
+
+  B2 and B2b can be applied together until nothing changes. Every rewrite strictly decreases
+  `(number of moves, sum of move ticks)` lexicographically: R1, R3 and R4 delete moves, the eager
+  rewrite shifts moves earlier, and a swap shifts one move one tick earlier. So the process stops,
+  and the result satisfies R1 to R4 and B2b at once. `test_satmodel2.canonicalize` implements
+  exactly this fixpoint.
+* **B3: twins** (as in `satmodel`). Emitters `e` and `e+3` have the same dynamics, lines and start.
+  The constraint: the trajectory of `e` is lexicographically ≤ that of `e+3` (value `2q + on`).
+* **B4: automorphisms of the pattern.** Take a map φ of line triples, made of an axis permutation π
+  and per-axis reversals `l → 2R−2−l`, with `φ(pattern) = pattern` and `φ(halo) = halo`. It acts on
+  trajectories: emitter `(axis a, twin j)` becomes emitter `(π(a), j)`, and `q → 2R − q` where axis
+  `a` is reversed. Moves stay ±1, parked ends map to parked ends, and the real start (`q = R`,
+  off) is invariant. The hit count of `φ(u)` in the image equals the hit count of `u` in the
+  original, so the detections are identical. φ does not need to be a symmetry of the hexagon,
+  because the model only sees pattern and halo.
+
+  The constraint is the **lex-leader** rule. Fix one total order on trajectories: emitter-major,
+  then tick, value `2q + on`. For each group element `g` among the twin swaps and the
+  automorphisms, require `X ≤_lex g(X)`. The lex-smallest member of every orbit of the generated
+  group satisfies all of them. B1, B2 and C are invariant under the group: φ maps lit to lit,
+  because it maps pattern + halo onto itself, and it maps monotone paths to monotone paths. So
+  apply B1 and B2 first, then take the orbit minimum. Patterns with symmetry are rare: 6/10 small,
+  28/210 medium, 2/190 large, and none of the open medium cases. So B4 mostly matters for small.
+
+### 10.3 C: knowledge from proven bounds
+
+`known = {'F': {j: lb}, 'W': {k: lb}}` holds lower bounds that were proven INFEASIBLE by an exact
+model. First, `satmodel2.closure` closes them under superadditivity: `W_{i+j} ≥ W_i + W_j` and
+`F_{i+j} ≥ F_i + W_j`. Both follow from cutting a program right after a detection. The rest of the
+program is then a W-type program (section 3). Let `d_1 < d_2 < …` be the detection ticks.
+
+* **C1: first detections.** `d_j ≥ F_j` from the real start. `d_j ≥ W_j` from a free start, and
+  also from `start_cfg`, since both start with pattern + halo empty. The prefix up to `d_j` is a
+  program for `j` copies.
+* **C2: detection density.** Any `L = W_i` consecutive ticks contain at most `i` detections. If
+  `d_j < … < d_{j+i}` all fell into `L` consecutive ticks, then the stretch `(d_j, d_{j+i}]` would
+  be a W-program for `i` copies with fewer than `W_i` ticks.
+* **C3: T is minimal** (the own bound equals `T`, i.e. `T−1` is proven infeasible):
+  * by C1 the `k`-th detection is exactly at tick `T`;
+  * **no deletable tick.** Let `same_t` mean that the lit beams of ticks `t` and `t−1` are equal as
+    multisets of `(axis, line)`. If `same_t` holds and there is no detection at `t−1`, then the state
+    after `t` equals the state after `t−1`. Firing the same beams again is idempotent: `h = 2`
+    cells already hold matter and `h ≥ 3` cells are already empty, and nothing was cleared in
+    between. So `det_t = 0`, and tick `t` has no effect except moving emitters. It can be **merged**
+    with a neighbour whenever no emitter acts (moves or toggles) in both transitions involved:
+    * with `t+1`: if every emitter idles into `t` or into `t+1`, config `t−1 → t+1` is a single step;
+    * with `t−1`: if every emitter idles into `t−1` or into `t`, config `t−2 → t` is a single step,
+      and the merged tick fires the beams of `t`, which equal those of `t−1`.
+
+    After a merge all detections are still there, each one tick earlier: a program of `T−1`
+    ticks, which is a contradiction. So the model forbids `same_t ∧ ¬det_{t−1} ∧ (all emitters
+    idle in one of the two transitions)`, for both neighbours. Special cases:
+    * A tick where nothing moves or toggles is the plain no-op case.
+    * With a free start, `same_2 ∧ ¬det_1` alone is forbidden, because the program can simply start
+      in config 2.
+    * From the real start, an all-idle tick 1 is forbidden: all emitters are off, nothing fires,
+      and deleting the tick changes nothing.
+
+C constraints are facts about all programs (given correct bounds), so they combine with B without
+any compatibility argument. Their strength comes from superadditivity. For example, medium case 186
+has `W1 = 6` and `W2 = 12`, so the question "W3 ≤ 18?" leaves exactly one detection pattern:
+`d = (6, 12, 18)`.
+
+**Caution:** C is only as sound as the bounds passed in. `close_medium2.py` passes only INFEASIBLE
+results from `decomp_2-medium.csv`, `close_medium.jsonl` (satmodel) and `close_medium2.jsonl`
+(satmodel2). `diff_satmodel2.py` passes only bounds of other, smaller questions proven by satmodel.
+
