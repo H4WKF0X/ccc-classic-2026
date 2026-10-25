@@ -1661,6 +1661,49 @@ mod tests {
         );
     }
 
+    /// Measurement (not a test): plain from-scratch beam attempts on a list of cases, for comparing
+    /// with proven optima (tools/level6/measure.py).  `L6_MEAS_CASES` = file of "key case" lines,
+    /// `L6_MEAS_W` = widths (default "800,4000"), `L6_MEAS_OUT` = output file, one line per attempt:
+    /// "key case width seconds program" with the program's lines joined by ';'.
+    #[test]
+    #[ignore]
+    fn measure() {
+        let list = std::fs::read_to_string(std::env::var("L6_MEAS_CASES").expect("L6_MEAS_CASES")).unwrap();
+        let widths: Vec<usize> = std::env::var("L6_MEAS_W")
+            .unwrap_or_else(|_| "800,4000".into())
+            .split(',')
+            .map(|w| w.trim().parse().unwrap())
+            .collect();
+        let threads: usize = std::env::var("L6_MEAS_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+        let mut inputs = std::collections::BTreeMap::new();
+        let mut items = Vec::new();
+        for line in list.lines().filter(|l| !l.trim().is_empty()) {
+            let (key, case) = line.trim().split_once(' ').unwrap();
+            let cases = inputs.entry(key.to_string()).or_insert_with(|| {
+                parse(&std::fs::read_to_string(Path::new(ROOT).join(format!("work/level6/in/in_level-6_{key}.txt"))).unwrap())
+            });
+            let c = &cases[case.trim().parse::<usize>().unwrap()];
+            for &w in &widths {
+                items.push((key.to_string(), case.trim().to_string(), w, c.count, Geo::new(&c.pattern)));
+            }
+        }
+        let res = harness::par::map_threads(threads, &items, |(_, _, w, count, geo)| {
+            let prm = beam::Params { width: *w, ..Default::default() };
+            let t = std::time::Instant::now();
+            let (prog, _) = beam::search(geo, &State::start(geo), *count, 999, &prm, 0, &|| false);
+            let text = prog.map_or(String::new(), |p| {
+                p.iter().map(|&a| unpack(a).iter().map(|&c| c as char).collect::<String>()).collect::<Vec<_>>().join(";")
+            });
+            (t.elapsed().as_secs_f64(), text)
+        });
+        let out: String = items
+            .iter()
+            .zip(&res)
+            .map(|((k, c, w, _, _), (secs, text))| format!("{k} {c} {w} {secs:.2} {text}\n"))
+            .collect();
+        std::fs::write(std::env::var("L6_MEAS_OUT").expect("L6_MEAS_OUT"), out).unwrap();
+    }
+
     #[test]
     fn beam_solves_example() {
         let input = std::fs::read_to_string(Path::new(ROOT).join("work/level6/in/in_level-6_0-example.txt")).unwrap();
