@@ -150,18 +150,50 @@ def commits(n=40):
     return [dict(hash=h, t=int(ts), subject=s) for h, ts, s in (l.split('|', 2) for l in out.splitlines())]
 
 
-def score_history(files):
-    """Contest end + every commit + live snapshots (appended by the sampler when the total changes)."""
-    pts = [dict(t=CONFIG['contest_end']['t'], source='contest end', **CONFIG['contest_end']['scores'])]
-    for p in git_history():
-        if all(p.get(k) for k in KEYS):
-            pts.append(p)
-    pts += [p for p in jsonl(f'{DASH}/history.jsonl')]
-    pts.append(dict(t=int(time.time()), source='now', **{k: files[k]['best'] for k in KEYS}))
-    pts.sort(key=lambda p: p['t'])
-    for p in pts:
-        p['total'] = sum(p[k] for k in KEYS)
+def progress_points():
+    """Round results from the optimiser logs ('[HH:MM:SS] round N done: <key> best X').  The logs only
+    have the clock time: real times are chained backwards from the file's modification time, using
+    the clock difference between consecutive lines (a small backwards step is the DST change)."""
+    pts = []
+    for path in glob.glob(f'{L6}/overnight*/progress.log'):
+        stamped = re.findall(r'^\[(\d+):(\d+):(\d+)\] (.*)$', read(path), re.M)
+        if not stamped:
+            continue
+        clock = [int(h) * 3600 + int(m) * 60 + int(sec) for h, m, sec, _ in stamped]
+        mt = os.path.getmtime(path); lt = time.localtime(mt)
+        t = mt - ((lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec - clock[-1]) % 86400)
+        for i in range(len(stamped) - 1, -1, -1):
+            if i < len(stamped) - 1:
+                d = (clock[i + 1] - clock[i]) % 86400
+                if d > 82800:            # clock went back by < 1 h: DST end
+                    d = d - 86400 + 3600
+                t -= d
+            m = re.match(r'round \d+ done: (\S+) best (\d+)', stamped[i][3])
+            if m:
+                key = {'large': '3-large', 'enormous': '4-enormous', 'medium': '2-medium'}.get(m.group(1), m.group(1))
+                pts.append(dict(t=int(t), source=f'{key} optimiser round', **{key: int(m.group(2))}))
     return pts
+
+
+def score_history(files):
+    """Every known score change: contest end, commits, optimiser rounds, live snapshots, now.
+    Partial points (one file) are completed by carrying the other files forward; points that do
+    not change the total are dropped."""
+    raw = [dict(t=CONFIG['contest_end']['t'], source='contest end', **CONFIG['contest_end']['scores'])]
+    raw += [p for p in git_history() if any(p.get(k) for k in KEYS)]
+    raw += progress_points() + jsonl(f'{DASH}/history.jsonl')
+    raw.append(dict(t=int(time.time()), source='now', **{k: files[k]['best'] for k in KEYS}))
+    raw.sort(key=lambda p: p['t'])
+    cur = dict(CONFIG['contest_end']['scores']); out = []
+    for p in raw:
+        for k in KEYS:
+            if p.get(k):
+                cur[k] = min(cur[k], p[k])      # the kept best never gets worse
+        q = dict(t=p['t'], source=p['source'], subject=p.get('subject', ''), **cur)
+        q['total'] = sum(cur[k] for k in KEYS)
+        if not out or q['total'] != out[-1]['total'] or p['source'] == 'now':
+            out.append(q)
+    return out
 
 
 # ---------------------------------------------------------------- processes / jobs

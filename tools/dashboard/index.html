@@ -91,6 +91,13 @@ tr.hl td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 #tip { position: fixed; pointer-events: none; background: var(--panel2); border: 1px solid var(--line); padding: 6px 8px;
   border-radius: 5px; font-size: 11px; display: none; z-index: 10; white-space: pre; }
 .empty { color: var(--faint); font-style: italic; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { background: transparent; color: var(--dim); border: none; border-radius: 0; padding: 3px 9px; font-weight: 400; }
+.seg button.on { background: var(--panel2); color: var(--text); font-weight: 600; }
+.minis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 6px; }
+.mini { background: var(--panel2); border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+.mini .kv b { font-size: 14px; }
+@media (max-width: 700px) { .minis { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -104,7 +111,13 @@ tr.hl td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
   <section class="panel c4"><h2>Leaderboard <span class="r">lower is better</span></h2><div id="ladder"></div></section>
   <section class="panel c3"><h2>Needs attention <span class="r" id="attn-n"></span></h2><div class="list" id="attention"></div></section>
 
-  <section class="panel c8"><h2>Score over time <span class="r" id="hist-r"></span></h2><div id="chart"></div></section>
+  <section class="panel c8"><h2>Score over time <span class="r" id="hist-r"></span></h2>
+    <div class="row" style="margin:0 0 6px">
+      <span class="seg" id="xmode"><button data-v="steps" class="on">each improvement</button><button data-v="time">real time</button></span>
+      <span class="seg" id="range"><button data-v="0" class="on">all</button><button data-v="24">24 h</button><button data-v="6">6 h</button><button data-v="2">2 h</button></span>
+      <span class="seg" id="series"><button data-v="total" class="on">total</button><button data-v="2-medium">medium</button><button data-v="3-large">large</button><button data-v="4-enormous">enormous</button></span>
+    </div>
+    <div id="chart"></div><div class="minis" id="minis"></div></section>
   <section class="panel c4"><h2>Machine <span class="r" id="sys-r"></span></h2><div id="system"></div></section>
 
   <section class="panel c7"><h2>Running jobs <span class="r" id="jobs-r"></span></h2><div class="list" id="jobs"></div></section>
@@ -216,35 +229,77 @@ function renderAttention() {
     : '<div class="empty">nothing — all good</div>';
 }
 
-function renderChart() {
-  const H = S.history.filter(p => p.t >= S.contest_end.t - 60);
-  const W = Math.max(320, $('chart').clientWidth), Ht = 190, pl = 52, pr = 12, pt = 10, pb = 24;
-  const t0 = H[0].t, t1 = Math.max(H[H.length - 1].t, t0 + 1);
-  const vs = H.map(p => p.total), refs = S.refs.map(r => r.total);
-  const span = Math.max(...vs, ...refs) - Math.min(...vs, ...refs);
-  const step = [10, 20, 25, 50, 100, 200, 500].find(st => span / st <= 5) || 1000;
-  const lo = Math.floor((Math.min(...vs, ...refs) - 5) / step) * step, hi = Math.ceil((Math.max(...vs, ...refs) + 5) / step) * step;
-  const X = t => pl + (W - pl - pr) * (t - t0) / (t1 - t0), Y = v => pt + (Ht - pt - pb) * (hi - v) / (hi - lo);
+let xMode = 'steps', rangeH = 0, series = 'total';
+
+function stepChart(H, key, W, Ht, opt) {
+  // H: points with .t and [key]; steps mode = one slot per improvement, time mode = real time
+  const pl = opt.pl ?? 52, pr = 12, pt = 12, pb = opt.pb ?? 24;
+  const vs = H.map(p => p[key]), refs = opt.refs || [];
+  const span = Math.max(...vs, ...refs.map(r => r.total)) - Math.min(...vs, ...refs.map(r => r.total));
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find(st => span / st <= (opt.ticks || 5)) || 1000;
+  const lo = Math.floor((Math.min(...vs, ...refs.map(r => r.total)) - step * .3) / step) * step;
+  const hi = Math.ceil((Math.max(...vs, ...refs.map(r => r.total)) + step * .3) / step) * step;
+  const n = H.length, t0 = H[0].t, t1 = Math.max(H[n - 1].t, t0 + 1);
+  const X = xMode === 'steps' ? (p, i) => pl + (W - pl - pr) * i / Math.max(1, n - 1) : p => pl + (W - pl - pr) * (p.t - t0) / (t1 - t0);
+  const Y = v => pt + (Ht - pt - pb) * (hi - v) / Math.max(1, hi - lo);
   let s = `<svg width="${W}" height="${Ht}" viewBox="0 0 ${W} ${Ht}">`;
-  for (let v = lo; v <= hi; v += step) {
+  if (opt.axis !== false) for (let v = lo; v <= hi; v += step)
     s += `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${pl - 6}" y="${Y(v) + 3}" text-anchor="end">${fmt(v)}</text>`;
+  for (const r of refs) s += `<line x1="${pl}" x2="${W - pr}" y1="${Y(r.total)}" y2="${Y(r.total)}" stroke="var(--note)" stroke-dasharray="3 4"/>
+    <text x="${pl + 4}" y="${Y(r.total) - 4}" style="fill:var(--note)">${esc(r.name)} ${fmt(r.total)}</text>`;
+  if (opt.labels !== false) {      // x labels: a handful, never overlapping
+    let lastX = -1e9;
+    H.forEach((p, i) => { const x = X(p, i); if (x - lastX > 90 && x < W - 60) { s += `<text x="${x}" y="${Ht - 6}" text-anchor="middle">${dayhm(p.t)}</text>`; lastX = x; } });
   }
-  for (const r of S.refs) s += `<line x1="${pl}" x2="${W - pr}" y1="${Y(r.total)}" y2="${Y(r.total)}" stroke="var(--note)" stroke-dasharray="3 4"/>
-    <text x="${W - pr - 4}" y="${Y(r.total) - 4}" text-anchor="end" style="fill:var(--note)">${esc(r.name)} ${r.total}</text>`;
-  const days = new Set();
-  for (const p of H) { const d = new Date(p.t * 1000).toDateString(); if (!days.has(d)) { days.add(d); s += `<text x="${X(p.t)}" y="${Ht - 6}">${dayhm(p.t)}</text>`; } }
-  // step line: the score stays until the next improvement
   let path = '';
-  H.forEach((p, i) => { path += i ? `H${X(p.t)}V${Y(p.total)}` : `M${X(p.t)},${Y(p.total)}`; });
+  H.forEach((p, i) => { path += i ? `H${X(p, i)}V${Y(p[key])}` : `M${X(p, i)},${Y(p[key])}`; });
   s += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
-  H.forEach((p, i) => s += `<circle cx="${X(p.t)}" cy="${Y(p.total)}" r="${p.source === 'now' ? 4 : 3}" fill="var(--accent)" data-i="${i}" style="cursor:pointer"/>`);
-  $('chart').innerHTML = s + '</svg>';
-  $('hist-r').textContent = `${H.length} points since contest end`;
+  H.forEach((p, i) => {
+    const d = i ? p[key] - H[i - 1][key] : 0;
+    if (opt.deltas && d < 0 && (xMode === 'steps' || n < 40)) s += `<text x="${X(p, i) + 4}" y="${Y(p[key]) + 13}" style="fill:var(--good)">${d}</text>`;
+    s += `<circle cx="${X(p, i)}" cy="${Y(p[key])}" r="${opt.r ?? 3}" fill="var(--accent)" data-i="${i}" style="cursor:pointer"/>`;
+  });
+  return s + '</svg>';
+}
+
+function renderChart() {
+  const all = S.history.filter(p => p.t >= S.contest_end.t - 60);
+  const cutT = rangeH ? S.now - rangeH * 3600 : 0;
+  let H = all.filter(p => p.t >= cutT);
+  if (rangeH) {          // start the window with the score at its left edge
+    const before = all.filter(p => p.t < cutT).pop();
+    if (before) H = [{...before, t: cutT, source: 'start of range'}].concat(H);
+  }
+  if (H.length < 2) H = all.slice(-2);
+  const W = Math.max(320, $('chart').clientWidth);
+  const refs = series === 'total' ? S.refs.filter(r => r.total >= Math.min(...H.map(p => p.total)) - 150) : [];
+  $('chart').innerHTML = stepChart(H, series, W, 200, {refs, deltas: true, r: 3.5});
+  const drop = H[0][series] - H[H.length - 1][series];
+  $('hist-r').textContent = `${H.length - 1} changes · −${fmt(drop)} ${rangeH ? `in the last ${rangeH} h` : 'since contest end'}`;
   $('chart').querySelectorAll('circle').forEach(c => {
-    c.onmousemove = e => { const p = H[+c.dataset.i]; tip(e, `${dayhm(p.t)}  ${p.source}\ntotal ${fmt(p.total)}\n` + KEYS.map(k => `${k} ${fmt(p[k])}`).join('\n') + (p.subject ? `\n${p.subject.slice(0, 90)}` : '')); };
+    c.onmousemove = e => { const i = +c.dataset.i, p = H[i], q = H[i - 1];
+      tip(e, `${dayhm(p.t)}  ${p.source}\ntotal ${fmt(p.total)}${q ? `  (${p.total - q.total >= 0 ? '+' : ''}${p.total - q.total})` : ''}\n` +
+        KEYS.map(k => `${k.padEnd(11)} ${fmt(p[k])}${q && p[k] !== q[k] ? `  (${p[k] - q[k]})` : ''}`).join('\n') + (p.subject ? `\n${p.subject.slice(0, 90)}` : '')); };
     c.onmouseleave = () => tip();
   });
+  // one small chart per file, each on its own scale (enormous moves differently from medium)
+  const mw = Math.max(160, ($('minis').clientWidth - 20) / 3);
+  $('minis').innerHTML = KEYS.map(k => {
+    const Hk = H.filter((p, i) => i === 0 || i === H.length - 1 || p[k] !== H[i - 1][k]);
+    const d = Hk[Hk.length - 1][k] - Hk[0][k];
+    return `<div class="mini" data-k="${k}"><div class="kv"><span class="dim">${k}</span><span><b>${fmt(S.files[k].best)}</b>
+      <span class="${d < 0 ? 'good' : 'faint'}">${d < 0 ? d : '±0'}</span></span></div>
+      ${Hk.length > 1 ? stepChart(Hk, k, mw - 16, 60, {pl: 4, pb: 4, axis: false, labels: false, r: 2}) : ''}</div>`;
+  }).join('');
+  $('minis').querySelectorAll('.mini').forEach(m => m.onclick = () => setSeg('series', m.dataset.k));
 }
+
+function setSeg(id, v) {
+  $(id).querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === String(v)));
+  if (id === 'xmode') xMode = v; else if (id === 'range') rangeH = +v; else series = v;
+  renderChart();
+}
+['xmode', 'range', 'series'].forEach(id => $(id).querySelectorAll('button').forEach(b => b.onclick = () => setSeg(id, b.dataset.v)));
 
 function renderSystem() {
   const y = S.system, mem = 1 - y.mem_avail / y.mem_total, cpu = y.temps.k10temp;
