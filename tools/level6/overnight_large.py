@@ -41,10 +41,16 @@ def read_best():
 
 
 def lower_bounds():
+    """Proven lower bound per case: bounds.csv, raised by bounds2_<key>.csv (satmodel2 runs)."""
     lb = {}
     for r in csv.DictReader(open(f'{RES}/bounds.csv')):
         if r['file'] == KEY and r['lb']:
             lb[int(r['case'])] = int(r['lb'])
+    p = f'{RES}/bounds2_{KEY}.csv'
+    if os.path.exists(p):
+        for r in csv.DictReader(open(p)):
+            if r['lb']:
+                lb[int(r['case'])] = max(lb.get(int(r['case']), 0), int(r['lb']))
     return lb
 
 
