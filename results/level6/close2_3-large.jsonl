@@ -2,3 +2,15 @@
 {"case": 144, "kind": "F", "k": 3, "T": 17, "status": "UNKNOWN", "secs": 120.2}
 {"case": 144, "kind": "W", "k": 4, "T": 20, "status": "UNKNOWN", "secs": 66.3}
 {"case": 12, "kind": "W", "k": 1, "T": 5, "status": "INFEASIBLE", "secs": 22.4}
+{"case": 111, "kind": "W", "k": 1, "T": 5, "status": "FEASIBLE", "secs": 26.4}
+{"case": 111, "kind": "W", "k": 2, "T": 10, "status": "INFEASIBLE", "secs": 114.1}
+{"case": 144, "kind": "F", "k": 5, "T": 27, "status": "UNKNOWN", "secs": 600.4, "method": "attack"}
+{"case": 111, "kind": "F", "k": 4, "T": 25, "status": "UNKNOWN", "secs": 600.5, "method": "attack"}
+{"case": 62, "kind": "F", "k": 6, "T": 39, "status": "UNKNOWN", "secs": 600.5, "method": "attack"}
+{"case": 35, "kind": "F", "k": 1, "T": 8, "status": "INFEASIBLE", "secs": 218.2, "method": "attack"}
+{"case": 99, "kind": "F", "k": 1, "T": 8, "status": "INFEASIBLE", "secs": 60.0, "method": "attack"}
+{"case": 112, "kind": "F", "k": 1, "T": 8, "status": "INFEASIBLE", "secs": 89.9, "method": "attack"}
+{"case": 113, "kind": "F", "k": 1, "T": 8, "status": "INFEASIBLE", "secs": 60.2, "method": "attack"}
+{"case": 96, "kind": "F", "k": 1, "T": 9, "status": "INFEASIBLE", "secs": 78.9, "method": "attack"}
+{"case": 98, "kind": "F", "k": 1, "T": 9, "status": "INFEASIBLE", "secs": 153.4, "method": "attack"}
+{"case": 15, "kind": "F", "k": 1, "T": 10, "status": "UNKNOWN", "secs": 600.2, "method": "attack"}

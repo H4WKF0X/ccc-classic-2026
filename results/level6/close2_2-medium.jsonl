@@ -1,0 +1,12 @@
+{"case": 167, "kind": "F", "k": 2, "T": 16, "status": "FEASIBLE", "secs": 833.9}
+{"case": 161, "kind": "F", "k": 4, "T": 29, "status": "UNKNOWN", "secs": 1800.5}
+{"case": 167, "kind": "F", "k": 3, "T": 23, "status": "UNKNOWN", "secs": 1800.5}
+{"case": 167, "kind": "F", "k": 4, "T": 30, "status": "UNKNOWN", "secs": 966.0}
+{"case": 161, "kind": "W", "k": 5, "T": 35, "status": "UNKNOWN", "secs": 1800.0}
+{"case": 197, "kind": "W", "k": 2, "T": 14, "status": "FEASIBLE", "secs": 469.7}
+{"case": 132, "kind": "W", "k": 1, "T": 7, "status": "UNKNOWN", "secs": 1800.2}
+{"case": 132, "kind": "F", "k": 1, "T": 8, "status": "INFEASIBLE", "secs": 134.9}
+{"case": 197, "kind": "F", "k": 2, "T": 15, "status": "UNKNOWN", "secs": 1800.2}
+{"case": 132, "kind": "F", "k": 1, "T": 9, "status": "INFEASIBLE", "secs": 1649.0}
+{"case": 197, "kind": "W", "k": 3, "T": 21, "status": "UNKNOWN", "secs": 1330.4}
+{"case": 132, "kind": "W", "k": 2, "T": 14, "status": "UNKNOWN", "secs": 16.0}
