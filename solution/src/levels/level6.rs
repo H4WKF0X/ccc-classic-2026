@@ -1261,9 +1261,21 @@ mod opt {
         })
     }
 
+    /// Beam widths per attempt: `WIDTHS`, or `L6_WIDTHS="20000,50000,100000"`.  After the list the
+    /// last two alternate.  Wider keeps paying off on big patterns (tools/level6/measure.py).
     fn width(attempt: u64) -> usize {
+        static OVERRIDE: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+        let ws = OVERRIDE.get_or_init(|| {
+            std::env::var("L6_WIDTHS")
+                .ok()
+                .map(|v| v.split(',').map(|w| w.trim().parse().expect("L6_WIDTHS: comma-separated widths")).collect())
+                .unwrap_or_else(|| WIDTHS.to_vec())
+        });
         let n = attempt as usize;
-        WIDTHS[if n < WIDTHS.len() { n } else { WIDTHS.len() - 2 + (n - WIDTHS.len()) % 2 }]
+        if ws.len() == 1 {
+            return ws[0];
+        }
+        ws[if n < ws.len() { n } else { ws.len() - 2 + (n - ws.len()) % 2 }]
     }
     /// Fractions of the incumbent kept as a fixed prefix (one is drawn per attempt).
     const PREFIX: [f64; 7] = [0.0, 0.0, 0.25, 0.4, 0.55, 0.7, 0.85];
