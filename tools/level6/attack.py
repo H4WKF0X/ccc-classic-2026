@@ -64,6 +64,7 @@ def main():
                 f.write(json.dumps(dict(case=c, kind='F', k=n, T=b - 1, status=s, secs=round(dt, 1),
                                         method='attack')) + '\n')
             print(f'{a.key} case {c} R={r} n={n} cells={len(lg.S)} best={b} lb={lb}: F{n}@{b - 1} {s} ({dt:.0f}s)', flush=True)
+            bounds2.summarize(a.key, cases, best)        # keep bounds2_<key>.csv (dashboard) current
             if s == 'INFEASIBLE':
                 bounds2.post('win', f'{a.key} case {c}: {b} lines proven optimal (no program with {b - 1})')
                 break
