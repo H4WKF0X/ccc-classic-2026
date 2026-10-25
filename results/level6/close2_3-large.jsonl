@@ -14,3 +14,11 @@
 {"case": 96, "kind": "F", "k": 1, "T": 9, "status": "INFEASIBLE", "secs": 78.9, "method": "attack"}
 {"case": 98, "kind": "F", "k": 1, "T": 9, "status": "INFEASIBLE", "secs": 153.4, "method": "attack"}
 {"case": 15, "kind": "F", "k": 1, "T": 10, "status": "UNKNOWN", "secs": 600.2, "method": "attack"}
+{"case": 97, "kind": "F", "k": 2, "T": 13, "status": "INFEASIBLE", "secs": 491.0, "method": "attack"}
+{"case": 107, "kind": "F", "k": 1, "T": 13, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
+{"case": 133, "kind": "F", "k": 1, "T": 13, "status": "UNKNOWN", "secs": 600.2, "method": "attack"}
+{"case": 161, "kind": "F", "k": 1, "T": 13, "status": "UNKNOWN", "secs": 600.4, "method": "attack"}
+{"case": 48, "kind": "F", "k": 1, "T": 15, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
+{"case": 151, "kind": "F", "k": 3, "T": 17, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
+{"case": 93, "kind": "F", "k": 3, "T": 18, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
+{"case": 34, "kind": "F", "k": 3, "T": 19, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}

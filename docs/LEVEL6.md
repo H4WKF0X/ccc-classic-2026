@@ -18,16 +18,20 @@ medium + large + enormous count on the website.
 
 | | medium | large | enormous | total |
 |---|---:|---:|---:|---:|
-| contest end (5th place) | 5,814 | 4,689 | 4,088 | 14,591 |
-| now, `results/level6/best/` | **5,805** | **4,648** | **4,073** | **14,526** |
-| provable lower bound | 5,736 | 3,581 | not computed yet | |
-| first place (approx.) | | | | ~14,290 |
+| contest end (5th Vienna, 17th world) | 5,814 | 4,689 | 4,088 | 14,591 |
+| now, `results/level6/best/` | **5,802** | **4,600** | **3,954** | **14,356** |
+| proven lower bound | 5,787 | 3,590 | 1,792 | |
+| proven optimal cases | 206/210 | 112/190 | 15/140 | |
 
-- 10/10 small and **203/210 medium cases are proven optimal**. Medium can improve by at most 69
-  lines in total.
-- 102/190 large cases are proven optimal. The remaining large gap (1,067 lines) is mostly *loose
-  bounds* on big patterns, not necessarily real room.
-- Enormous bounds still have to be computed (an ~8 h overnight job, see below).
+Known leaderboard totals from the contest: Tschech 14,362 (1st world), Krautl 14,499 (1st Vienna,
+5th world). Our 14,356 was uploaded to a training game of the same contest on 2026-10-25 (all six
+levels correct); it is post-contest and unofficial.
+
+- Medium can improve by at most 15 lines (open: 132, 161, 167, 197).
+- The large and enormous gaps are mostly *loose bounds* on big patterns, not necessarily real room.
+- **What found the last 170 lines: beam width.** The plain beam keeps getting better with width on
+  big patterns (from scratch, large: +342 lines above our best at width 800, +117 at 20,000, +60 at
+  100,000). The optimiser used to stop at 12,000. See "What to run" below.
 
 ## Where things are
 
@@ -61,6 +65,8 @@ cargo ccc validate 6                 # example must say GO
 cargo ccc all 6 --budget 600         # optimise 10 min per file, seeded from work/level6/best/
 CCC_THREADS=8 nice -n 10 cargo ccc all 6 --budget 600   # same, limited to 8 threads
 L6_SEED_DIR="" cargo ccc all 6 --budget 180   # from scratch, no seeds
+L6_WIDTHS=100000 cargo ccc all 6 --budget 3600  # much wider beams (default schedule 800 ... 12,000)
+L6_ALT="hp=40" L6_ALT_PCT=33 ...               # a share of restarts with other beam knobs
 ```
 
 The harness keeps the best program per case in `work/level6/best/` across runs, so experiments can
@@ -83,6 +89,11 @@ Run with `~/.ccc-venv/bin/python` (has OR-Tools / CP-SAT and HiGHS).
 | `collect.py` | Merges all results into `results/level6/bounds.csv` and the markdown tables. |
 | `cycles.py`, `multi_cycles.py` | Repeating-cycle search (from the contest). |
 | `splice.py` | Recombine copy-to-copy stretches across many programs. |
+| `bounds2.py` | Lower-bound climbing with `satmodel2` for any file (W_k, F_j from the proven value upwards). |
+| `attack.py` | Exact search for a whole program with best−1 lines (or a proof that the best is optimal). |
+| `inner.py`, `cyc.py` | Inner-copy windows and exact repeating cycles (both tried, no wins at scale). |
+| `measure.py`, `watch_wins.py` | Compare plain beam runs (the `measure` test) with the best; follow a run and save wins. |
+| `merge_improved.py` | Merge `results/level6/improved/*` into `work/level6/best/` (re-checked by `cargo ccc best 6`). |
 | `view_case.py` | Writes one case + its program for the offline viewer (`work/level6/statement/sandbox-level-6.html`, paste into Input / Solution). |
 
 Improvements found by `exact.py` / `improve.py` land in `results/level6/exact_programs/` and
@@ -90,10 +101,43 @@ Improvements found by `exact.py` / `improve.py` land in `results/level6/exact_pr
 `work/level6/candidates/` (the name must contain `2-medium`, `3-large` or `4-enormous`) and run
 `cargo ccc best 6`. It checks every program and keeps the shorter one per case.
 
-## Overnight: enormous lower bounds
+## What to run (what works, what does not)
 
-See section 7 of [`level6-theory.md`](level6-theory.md) for the exact commands (3 processes × 4
-threads, ≈ 8 hours). Afterwards run `~/.ccc-venv/bin/python tools/level6/collect.py --md`.
+**Works: very wide beams.** Seeded optimiser at width 100,000 on the open cases of one file
+(about 360 MB RAM per process; `--no-windows` = Rust only):
+
+```bash
+L6_WIDTHS=100000 nice -n 10 ~/.ccc-venv/bin/python -u tools/level6/overnight_large.py \
+    --key 4-enormous --hours 6 --round-min 60 --rust-threads 7 --no-windows
+```
+
+Plain from-scratch sweeps at a given width (writes one line per finished case; `watch_wins.py` saves
+every program shorter than the best):
+
+```bash
+cd solution && L6_MEAS_CASES=$PWD/../work/level6/measure/big_open.txt L6_MEAS_W=500000 \
+    L6_MEAS_OUT=$PWD/../work/level6/measure/w500k_out.txt L6_MEAS_THREADS=7 \
+    cargo test --release level6::tests::measure -- --ignored
+~/.ccc-venv/bin/python -u tools/level6/watch_wins.py work/level6/measure/w500k_out.txt
+~/.ccc-venv/bin/python tools/level6/merge_improved.py        # then copy best/ to results/ and commit
+```
+
+On 2026-10-25: one width-100,000 sweep over all large+enormous cases found 20 shorter programs
+(−21 lines); four seeded width-100,000 rounds gave −34, −10, −4, −2; 30 minutes of width 500,000
+on the 21 biggest open patterns gave −4. 93 big open patterns were never tried at 500,000.
+
+**Does not pay any more** (all measured on 2026-10-25, details in the git log):
+
+- exact windows between copies (`improve.py`): only short windows decide; capped at 18 lines;
+- inner-copy windows (`inner.py`): 176 spans of 4–18 ticks, 0 wins: the programs are locally optimal;
+- best−1 whole-program attack (`attack.py`): proves short programs optimal, 0 shorter programs;
+- exact cycles (`cyc.py`): undecided at the copy lengths where there is room;
+- halo matter in the beam (`L6_ALT="hp=40"`): 0 wins in two rounds;
+- the beam at width ≤ 12,000 (the old optimiser): stalled.
+
+Lower bounds: `bounds2.py` climbs W_k / F_j with `satmodel2` (cheap enormous pass: `--secs 45
+--case-budget 90`, about 1.5 hours). Results land in `results/level6/bounds2_<key>.csv`, which the
+optimiser and the dashboard read.
 
 ## How we got here (short history)
 
@@ -103,6 +147,12 @@ threads, ≈ 8 hours). Afterwards run `~/.ccc-venv/bin/python tools/level6/colle
 2. **Day after:** cleaned up, rewrote the solver in Rust (6–10× faster), and built exact methods
    (CP-SAT on a line-coordinate model). These proved most medium cases optimal and found
    improvements in cases where every beam search, ours and the other teams', had stopped improving. Result: 14,526.
+3. **Day 3 (2026-10-25):** enormous optimiser rounds and exact windows (14,445), a stronger exact
+   model (satmodel2: medium 58 and 186 optimal, 206/210 medium proven), first real enormous bounds,
+   a live dashboard, and many exact ideas that found nothing (above). Then a measurement of the plain
+   beam against all known optima showed that width had not saturated: widths 100,000–500,000 took
+   the total from 14,431 to **14,356**, below the contest's first place. Uploaded to a training
+   game: all levels correct, 14,356.
 
 ## Live dashboard
 
