@@ -74,6 +74,9 @@ Run with `~/.ccc-venv/bin/python` (has OR-Tools / CP-SAT and HiGHS).
 |---|---|
 | `lines.py` | Line-coordinate model of the board (asserts its facts on every case). |
 | `satmodel.py` | Exact CP-SAT model: "is there a program of T lines with `count` copies?" |
+| `satmodel2.py` | Stronger drop-in version of `satmodel.py`: valid cuts, dominance/symmetry breaking, proven bounds as knowledge (theory section 10). |
+| `test_satmodel2.py`, `diff_satmodel2.py` | Soundness tests (pool + random trajectories) and the differential test against `satmodel.py`. |
+| `close_medium2.py`, `stitch.py`, `medium_bounds2.py` | Decisive W/F solves with `satmodel2`, stitching full programs from them, recomputed medium bounds. |
 | `exact.py` | Whole-program optimality proofs (solve at T = best−1; INFEASIBLE = optimal). |
 | `bounds.py` | Lower bounds by splitting a program at its copies (first copy + later copies). |
 | `improve.py` | Exact window re-optimisation: re-solve the stretch between two copies, keep it if shorter. |
