@@ -1,4 +1,4 @@
-"""Overnight optimisation of 3-large: everything we learned, in rounds.
+"""Overnight optimisation of one input file (default 3-large; --key 4-enormous): everything we learned, in rounds.
 
 Each round (default 45 min):
   1. Open cases = large cases whose best is above the proven lower bound (results/level6/bounds.csv),
@@ -17,13 +17,13 @@ usage (from the repo root):
   nice -n 10 ~/.ccc-venv/bin/python -u tools/level6/overnight_large.py --hours 8
 Progress: work/level6/overnight/progress.log (one line per round with totals).
 """
-import argparse, csv, os, subprocess, sys, time
+import argparse, csv, hashlib, json, os, re, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 L6 = os.path.join(ROOT, 'work', 'level6')
 TOOLS = os.path.join(ROOT, 'tools', 'level6')
 RES = os.path.join(ROOT, 'results', 'level6')
-KEY = '3-large'
+KEY = '3-large'   # overridden by --key
 PY = os.path.expanduser('~/.ccc-venv/bin/python')
 
 
@@ -56,6 +56,30 @@ def write_full(progs, path):
     open(path, 'w').write('\n\n'.join(p.strip('\n') for p in progs) + '\n\n')
 
 
+def prog_hash(p):
+    return hashlib.md5(p.strip('\n').encode()).hexdigest()
+
+
+def windows_done(od):
+    """{case: hash of the program whose windows were all checked} (persists across rounds and runs)."""
+    try:
+        return {int(k): v for k, v in json.load(open(f'{od}/windows_done.json')).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_windows_done(od, logpath, done):
+    """improve.py prints '<key> case N: a -> b' once all windows of case N are checked."""
+    if not os.path.exists(logpath):
+        return
+    best = read_best()
+    for line in open(logpath):
+        m = re.match(rf'{re.escape(KEY)} case (\d+): \d+ -> \d+', line)
+        if m:
+            i = int(m.group(1)); done[i] = prog_hash(best[i])
+    json.dump(done, open(f'{od}/windows_done.json', 'w'))
+
+
 def merge(log):
     out = subprocess.run(['cargo', 'ccc', 'best', '6'], cwd=ROOT, capture_output=True, text=True).stdout
     for l in out.split('\n'):
@@ -69,8 +93,12 @@ def main():
     ap.add_argument('--round-min', type=float, default=45)
     ap.add_argument('--rust-threads', type=int, default=8)
     ap.add_argument('--cpsat-workers', type=int, default=4)
+    ap.add_argument('--key', default='3-large', help='input file, e.g. 3-large or 4-enormous')
     a = ap.parse_args()
-    od = f'{L6}/overnight'; os.makedirs(od, exist_ok=True)
+    global KEY
+    KEY = a.key
+    od = f'{L6}/overnight' if KEY == '3-large' else f'{L6}/overnight_{KEY}'
+    os.makedirs(od, exist_ok=True)
     logf = open(f'{od}/progress.log', 'a')
 
     def log(msg):
@@ -86,7 +114,7 @@ def main():
         open_cases = sorted((i for i in range(len(best)) if len(best[i].split('\n')) > lb.get(i, 0)),
                             key=lambda i: -(len(best[i].split('\n')) - lb.get(i, 0)))
         gap = sum(len(best[i].split('\n')) - lb.get(i, 0) for i in open_cases)
-        log(f'round {rnd}: large best {total(best)}, {len(open_cases)} open cases, gap to bounds {gap}')
+        log(f'round {rnd}: {KEY} best {total(best)}, {len(open_cases)} open cases, gap to bounds {gap}')
         if not open_cases:
             break
         secs = int(min(a.round_min * 60, end - time.time() - 120))
@@ -97,16 +125,22 @@ def main():
             for i in open_cases:
                 f.write('\n'.join(blocks[i]) + '\n\n')
         write_full([best[i] for i in open_cases], f'{seed_dir}/out_open.txt')
+        # exact windows: only cases whose current program has not been fully checked yet, shortest first
+        wdone = windows_done(od)
+        win_cases = sorted((i for i in open_cases if wdone.get(i) != prog_hash(best[i])),
+                           key=lambda i: len(best[i].split('\n')))
+        log(f'round {rnd}: windows on {len(win_cases)} unchecked cases ({len(open_cases) - len(win_cases)} already checked)')
         rout = f'{od}/out_open_r{rnd}.txt'
         env = dict(os.environ, L6_SEED_DIR=seed_dir, CCC_THREADS=str(a.rust_threads), L6_SEED=str(rnd))
         rust = subprocess.Popen(['nice', '-n', '10', 'cargo', 'ccc', 'run', '6', rin, rout, '--budget', str(secs)],
                                 cwd=ROOT, env=env, stdout=open(f'{od}/rust_r{rnd}.log', 'w'), stderr=subprocess.STDOUT)
         cp = subprocess.Popen(['nice', '-n', '10', 'timeout', str(secs), PY, '-u', f'{TOOLS}/improve.py', KEY,
-                               '--cases', ','.join(map(str, sorted(open_cases, key=lambda i: len(best[i].split('\n'))))),
+                               '--cases', ','.join(map(str, win_cases)),
                                '--maxlen', '30', '--secs', '60',
                                '--workers', str(a.cpsat_workers)],
                               cwd=TOOLS, stdout=open(f'{od}/improve_r{rnd}.log', 'w'), stderr=subprocess.STDOUT)
         rust.wait(); cp.wait()
+        record_windows_done(od, f'{od}/improve_r{rnd}.log', wdone)
         # map the Rust programs back into a full large file
         if os.path.exists(rout):
             rprogs = open(rout).read().strip('\n').split('\n\n')
@@ -127,7 +161,7 @@ def main():
         if imp:
             write_full(full, f'{L6}/candidates/overnight_cpsat_r{rnd}_{KEY}.txt')
         merge(log)
-        log(f'round {rnd} done: large best {total(read_best())}')
+        log(f'round {rnd} done: {KEY} best {total(read_best())}')
     log('overnight run finished')
 
 
