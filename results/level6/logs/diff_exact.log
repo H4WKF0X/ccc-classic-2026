@@ -1,0 +1,12 @@
+98 instances
+case  28 F12@49 pure : UNKNOWN 600.7s   old: INFEASIBLE 134.1s (exact)
+case  28 F12@50 pure : UNKNOWN 600.6s   old: FEASIBLE Nones (exact(best program))
+case  77 F8@32 pure : INFEASIBLE 276.5s   old: INFEASIBLE 59.5s (exact)
+case  77 F8@33 pure : FEASIBLE 235.0s   old: FEASIBLE Nones (exact(best program))
+case 171 F9@36 pure : INFEASIBLE 163.0s   old: INFEASIBLE 37.3s (exact)
+case 171 F9@37 pure : FEASIBLE 198.2s   old: FEASIBLE Nones (exact(best program))
+case 141 F17@52 pure : INFEASIBLE 96.8s   old: INFEASIBLE 32.0s (exact)
+case 141 F17@53 pure : FEASIBLE 113.2s   old: FEASIBLE Nones (exact(best program))
+case   9 F17@52 pure : INFEASIBLE 116.6s   old: INFEASIBLE 31.7s (exact)
+case   9 F17@53 pure : FEASIBLE 265.2s   old: FEASIBLE Nones (exact(best program))
+case 181 F19@57 pure : INFEASIBLE 137.5s   old: INFEASIBLE 26.9s (exact)

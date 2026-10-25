@@ -1,0 +1,16 @@
+1423 jobs
+100/1423 {'jobs': 100, 'tests': 1650, 'skipped': 5, 'fails': 0, 'copies_ge1': 0, 'free': 0} 63s
+200/1423 {'jobs': 200, 'tests': 3372, 'skipped': 15, 'fails': 0, 'copies_ge1': 0, 'free': 0} 137s
+300/1423 {'jobs': 300, 'tests': 5216, 'skipped': 17, 'fails': 0, 'copies_ge1': 0, 'free': 0} 221s
+400/1423 {'jobs': 400, 'tests': 7170, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 306s
+500/1423 {'jobs': 500, 'tests': 9144, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 429s
+600/1423 {'jobs': 600, 'tests': 11244, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 537s
+700/1423 {'jobs': 700, 'tests': 13230, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 614s
+800/1423 {'jobs': 800, 'tests': 15274, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 708s
+900/1423 {'jobs': 900, 'tests': 17290, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 823s
+1000/1423 {'jobs': 1000, 'tests': 19182, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 902s
+1100/1423 {'jobs': 1100, 'tests': 21206, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 996s
+1200/1423 {'jobs': 1200, 'tests': 22138, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 1092s
+1300/1423 {'jobs': 1300, 'tests': 22882, 'skipped': 19, 'fails': 0, 'copies_ge1': 0, 'free': 0} 1280s
+1400/1423 {'jobs': 1400, 'tests': 23648, 'skipped': 20, 'fails': 0, 'copies_ge1': 0, 'free': 0} 1531s
+SUMMARY {'jobs': 1423, 'tests': 23826, 'skipped': 20, 'fails': 0, 'copies_ge1': 0, 'free': 0, 'secs': 1584, 'mode': 'pool', 'keys': ['1-small', '2-medium', '3-large']}

@@ -480,3 +480,108 @@ has `W1 = 6` and `W2 = 12`, so the question "W3 ≤ 18?" leaves exactly one dete
 results from `decomp_2-medium.csv`, `close_medium.jsonl` (satmodel) and `close_medium2.jsonl`
 (satmodel2). `diff_satmodel2.py` passes only bounds of other, smaller questions proven by satmodel.
 
+### 10.4 Safeguards (results)
+
+1. **Derivations:** sections 10.1 to 10.3.
+2. **Soundness: real programs** (`test_satmodel2.py pool`). The test covers every distinct valid
+   program in `work/level6/pool/**` plus `best/`: 24 small, all 1100 medium, and 300 of 1114 large
+   (random sample). For each program it checks the whole program (real start), its prefixes up to
+   detection 1 and 2 (F-questions), and every stretch of 1 or 2 copies between detections
+   (free-start W-questions). That makes **23,834 fixed-trajectory tests, 0 failures**. Each test has
+   four parts:
+   * `base`: model with A only, detection ticks forced to the simulator's ticks, must be FEASIBLE;
+   * `base+1`: one copy more must be INFEASIBLE;
+   * `canon-replay`: the canonical representative (B1, B2, B2b, then the lex-smallest member of the
+     orbit under twins and automorphisms) replays to the same detection ticks;
+   * `canon`: the full model (A + B + C, with every proven bound of the case) accepts the canonical
+     representative.
+
+   The "T is minimal" rules (C3) were active in 3,736 of these tests: every proven-optimal program
+   and every stretch whose length equals its proven W bound. 20 programs walk round the back of the
+   ring and cannot be projected, so they were skipped. An earlier version without C3 merges and
+   B2b also passed (23,826 tests, 0 failures).
+3. **Soundness: random trajectories** (`test_satmodel2.py random --n 2000`): 2000 trajectories on
+   random small and medium cases. 70 % are mutations of best programs (each action replaced with
+   probability 0 to 0.3, either from the real start or from a detection on), the rest are random
+   walks. 1031 start from the real start, 969 from a free start, 665 make at least one copy, and
+   112 have C3 active. **0 failures.** The line simulator used by the tests is cross-checked
+   against `cycles.simulate` on every real-start trajectory.
+4. **The tests detect errors.** With the canonicalisation switched off, 401 `canon` failures on 40
+   medium cases. With a deliberately wrong rule ("never reverse"), 483 failures.
+5. **Differential test** (`diff_satmodel2.py`, satmodel2 vs the verdicts satmodel recorded):
+   40 runs, **0 disagreements**, 2 timeouts (UNKNOWN, case 28, see 10.5). They cover the 5
+   regression instances (each `pure` and `known`), 19 decomposition probes (INF and FEA), and 6
+   whole-program proofs at `T = best−1` plus 5 FEASIBLE runs at `T = best`.
+6. **Every FEASIBLE answer is replayed:** `cycles.simulate` for real starts, the line simulator for
+   W-chains. The stitched programs are replayed in full.
+
+### 10.5 Speed
+
+The machine load varied a lot today, so recorded old times are only indicative. Old 28 F12@49
+took 134 s in the original run and 400 s now, under 16 busy threads. Only back-to-back runs under
+the same load are fair comparisons (4 workers each):
+
+| question | satmodel | satmodel2 | satmodel2 without B2/B2b | satmodel2, A cuts off too |
+|---|---:|---:|---:|---:|
+| 132 W1@5 (free start) | 50.8 / 47.8 s | 13.7 / 15.1 s | 33.2 / 35.5 s | 33.7 / 40.5 s |
+| 161 W1@5 | 46.5 s | 11.9 s | | |
+| 186 W1@4 | 4.6 s | 1.6 s | | |
+| 171 F9@36 (real start, whole program) | 259 s | 171 s | **130 s** | |
+| 28 F12@49 (real start, whole program) | 400 s | > 600 s (concurrent run) | **291 s** | |
+| 50 F2@14 FEASIBLE | 119 s | 142 s | **38 s** | 51 s (B on) |
+
+* **Free start (W_k):** about 3 to 4× faster. Most of it comes from the dominance rules B1/B2,
+  which remove the many equivalent paths of dark emitters and the free `t = 0`.
+* **Real start (F_j, whole programs):** B2/B2b *hurt*. The real start pins every emitter, so there
+  is little dark freedom to remove, and the extra clauses slow propagation and make solutions
+  rarer. Use `opts={'canon': False, 'swap': False}` there, which is 1.4 to 3× faster than
+  satmodel.
+* Regression instances against the recorded satmodel times (same 4 workers, unknown load then):
+
+  | instance | satmodel (recorded) | satmodel2 pure | satmodel2 + known |
+  |---|---:|---:|---:|
+  | 186 W1@5 INF | 127 s | 22 s | 25 s |
+  | 58 W2@10 INF | 608 s | 199 s | 119 s |
+  | 50 W2@10 INF | 815 s | 321 s | 273 s |
+  | 132 W1@6 INF | 1566 s | 225 s | 211 s |
+  | 161 W1@6 INF | 1315 s | 229 s | 293 s |
+
+### 10.6 Results on the hard questions (`results/level6/close_medium2.jsonl`)
+
+| question | satmodel | satmodel2 + known | consequence |
+|---|---|---|---|
+| 186 W3@18 | UNKNOWN 1800 s | **FEASIBLE** 683 s | W3 = 18 |
+| 186 F2@14 | UNKNOWN 60 s | FEASIBLE 180 s | F2 = 14; suffix W2@12 from its end: FEASIBLE 21 s, giving **a 26-line program** (best was 27), which meets lb 26: **optimal** |
+| 186 F4@26 | UNKNOWN 60 s | UNKNOWN 1800 s | (settled by the stitched program) |
+| 58 W4@22 | UNKNOWN 1800 s | **FEASIBLE** 1039 s | W4 = 22; F1@7 + suffix W4@22 from its end (158 s) gives **a 29-line program** (best was 31), which meets lb 29: **optimal** |
+| 167 W1@6 | UNKNOWN 900 s | **INFEASIBLE** 309 s | W1 = 7 |
+| 167 F1@8 | UNKNOWN 60 s | **INFEASIBLE** 232 s | F1 = 9; lb 104 → **121** (best 122) |
+| 197 W1@6 | UNKNOWN 900 s | **INFEASIBLE** 274 s | W1 = 7; lb 50 → **57** (best 65) |
+| 197 W2@14 | (not asked) | UNKNOWN 1800 s | would decide whether later copies can cost 7 instead of 8 |
+| 132 W1@7 | UNKNOWN 1800 s | UNKNOWN 1800 s | open (W1 ∈ {7, 8}) |
+| 161 F2@15, F3@22 | UNKNOWN 60 s | FEASIBLE 149 s / 1183 s | first copies at 8, 15, 22 are possible; the stitched suffix (4 copies in 28) is UNKNOWN in 600 s, greedy chaining stalls at copy 6 |
+| 161 W2@13, 167 W2@12, 132 W2@13 | UNKNOWN | INFEASIBLE, implied | by superadditivity of the earlier W1 ≥ 7 proofs, no solve needed |
+
+**Medium now** (`medium_bounds2.py` → `results/level6/bounds_medium2.csv`): **206/210 proven
+optimal** and total best 5802. The 4 open cases have a total gap of **17 lines**: 132 (lb 43 /
+best 50), 161 (50 / 51), 167 (121 / 122), 197 (57 / 65). This morning there were 7 open cases with
+gap 44, and section 4 had 69.
+
+### 10.7 How to use satmodel2
+
+* **W_k bounds (free start):** `satmodel2.solve(lg, T, k, free_start=True, secs, workers=4,
+  known=K)` with the defaults (`symbreak=True`, all options on).
+* **F_j bounds and whole-program proofs (real start):** `satmodel2.solve(lg, T, j, secs,
+  workers=4, known=K, opts={'canon': False, 'swap': False})`.
+* `K = {'F': {j: lb}, 'W': {k: lb}}` must contain only lower bounds proven INFEASIBLE by an exact
+  model (largest INFEASIBLE `T` + 1). Always pass them. They cost nothing and make the following
+  probes much smaller:
+  * **Climb:** probe `T = lb` first, so that C3 is active (last detection at `T`, no deletable
+    ticks).
+  * **Ask the closure first:** W2 at `2·W1`, F2 at `F1 + W1`, … (`satmodel2.closure`). The
+    superadditivity windows then pin the detection ticks almost completely.
+* **improve.py windows** (`start_cfg` set): B is switched off automatically. Pass
+  `known={'W': W_lbs}` (plus `'F'` for the window from the real start). Windows shorter than the
+  W bound of their copy count then die instantly.
+* **Stitching:** a FEASIBLE F_j or W_k answer is half a program. `stitch.py` completes it with a
+  fixed-start suffix or prefix, and that is how 186 and 58 got their shorter programs.

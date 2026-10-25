@@ -1,0 +1,26 @@
+usage: stitch.py [-h] --case CASE --chain-k CHAIN_K --chain-T CHAIN_T --j J
+                 --T T [--secs SECS] [--workers WORKERS] [--suffix] [--k K]
+                 [--Tk TK]
+stitch.py: error: the following arguments are required: --chain-k, --chain-T
+usage: stitch.py [-h] --case CASE --chain-k CHAIN_K --chain-T CHAIN_T --j J
+                 --T T [--secs SECS] [--workers WORKERS] [--suffix] [--k K]
+                 [--Tk TK]
+stitch.py: error: the following arguments are required: --chain-k, --chain-T
+suffix 2 copies in 12 from the end of F2@14: FEASIBLE (21s)
+stitched program: 26 lines, simulate -> 26 (best 27, count 4)
+SHORTER PROGRAM -> /home/max/projects/ccc-classic2/results/level6/exact_programs/2-medium_186_stitched.txt
+suffix 4 copies in 28 from the end of F3@22: UNKNOWN (600s)
+copy 4: FEASIBLE (7s)
+copy 5: FEASIBLE (4s)
+copy 6: INFEASIBLE (31s)
+5 copies in 36 lines (simulate -> 36); best 51 for 7
+copy 4: UNKNOWN (300s)
+3 copies in 22 lines (simulate -> 22); best 51 for 7
+prefix 1 copies in 7 ending in the chain start: INFEASIBLE (0s)
+prefix 1 copies in 8 ending in the chain start: FEASIBLE (0s)
+stitched program: 30 lines, simulate -> 30 (best 31, count 5)
+SHORTER PROGRAM -> /home/max/projects/ccc-classic2/results/level6/exact_programs/2-medium_58_stitched.txt
+case 58 F1@7: FEASIBLE (11.3s, satmodel2+known)
+suffix 4 copies in 22 from the end of F1@7: FEASIBLE (158s)
+stitched program: 29 lines, simulate -> 29 (best 31, count 5)
+SHORTER PROGRAM -> /home/max/projects/ccc-classic2/results/level6/exact_programs/2-medium_58_stitched.txt

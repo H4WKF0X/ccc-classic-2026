@@ -1,0 +1,17 @@
+case 186 W3@18: FEASIBLE (683.2s, satmodel2+known)
+case 186 F4@26: UNKNOWN (1800.8s, satmodel2+known)
+case 161 F2@15: FEASIBLE (149.3s, satmodel2+known)
+case 186 F2@14: FEASIBLE (180.0s, satmodel2+known)
+case 161 F3@22: FEASIBLE (1182.9s, satmodel2+known)
+case 167 W1@6: INFEASIBLE (308.7s, satmodel2+known)  -> W1 >= 7
+bash: line 2: 61571: command not found
+bash: line 3: 61574: command not found
+case 197 W1@6: INFEASIBLE (274.3s, satmodel2+known)  -> W1 >= 7
+case 167 F1@8: INFEASIBLE (231.7s, satmodel2+known)  -> F1 >= 9
+case 132 W1@7: UNKNOWN (1800.3s, satmodel2+known)
+case 161 W2@13: INFEASIBLE (0.0s, implied (lb 14 by superadditivity))  -> W2 >= 14
+case 167 W2@12: INFEASIBLE (0.0s, implied (lb 14 by superadditivity))  -> W2 >= 13
+case 132 W2@13: INFEASIBLE (0.0s, implied (lb 14 by superadditivity))  -> W2 >= 14
+case 58 W4@22: FEASIBLE (1038.6s, satmodel2+known)
+case 58 F1@7: FEASIBLE (11.3s, satmodel2+known)
+case 197 W2@14: UNKNOWN (1800.4s, satmodel2+known)

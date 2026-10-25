@@ -1,0 +1,11 @@
+5 instances
+case  58 W2@10 pure : INFEASIBLE 199.1s   old: INFEASIBLE 608.1s (close_medium)
+case  58 W2@10 known: INFEASIBLE 118.6s   old: INFEASIBLE 608.1s (close_medium)
+case  50 W2@10 pure : INFEASIBLE 320.8s   old: INFEASIBLE 815.1s (close_medium)
+case  50 W2@10 known: INFEASIBLE 272.7s   old: INFEASIBLE 815.1s (close_medium)
+case 186 W1@5 pure : INFEASIBLE 22.2s   old: INFEASIBLE 126.6s (close_medium)
+case 186 W1@5 known: INFEASIBLE 24.7s   old: INFEASIBLE 126.6s (close_medium)
+case 132 W1@6 pure : INFEASIBLE 224.6s   old: INFEASIBLE 1566.3s (close_medium)
+case 132 W1@6 known: INFEASIBLE 210.5s   old: INFEASIBLE 1566.3s (close_medium)
+case 161 W1@6 pure : INFEASIBLE 228.9s   old: INFEASIBLE 1315.2s (close_medium)
+case 161 W1@6 known: INFEASIBLE 293.2s   old: INFEASIBLE 1315.2s (close_medium)

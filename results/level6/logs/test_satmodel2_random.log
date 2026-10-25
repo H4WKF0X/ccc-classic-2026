@@ -1,0 +1,22 @@
+2000 jobs
+100/2000 {'jobs': 100, 'tests': 100, 'skipped': 0, 'fails': 0, 'copies_ge1': 34, 'free': 47, 'c3': 7} 9s
+200/2000 {'jobs': 200, 'tests': 200, 'skipped': 0, 'fails': 0, 'copies_ge1': 65, 'free': 98, 'c3': 12} 17s
+300/2000 {'jobs': 300, 'tests': 300, 'skipped': 0, 'fails': 0, 'copies_ge1': 97, 'free': 146, 'c3': 18} 24s
+400/2000 {'jobs': 400, 'tests': 400, 'skipped': 0, 'fails': 0, 'copies_ge1': 136, 'free': 199, 'c3': 22} 32s
+500/2000 {'jobs': 500, 'tests': 500, 'skipped': 0, 'fails': 0, 'copies_ge1': 163, 'free': 237, 'c3': 30} 40s
+600/2000 {'jobs': 600, 'tests': 600, 'skipped': 0, 'fails': 0, 'copies_ge1': 194, 'free': 290, 'c3': 37} 47s
+700/2000 {'jobs': 700, 'tests': 700, 'skipped': 0, 'fails': 0, 'copies_ge1': 226, 'free': 338, 'c3': 44} 55s
+800/2000 {'jobs': 800, 'tests': 800, 'skipped': 0, 'fails': 0, 'copies_ge1': 260, 'free': 377, 'c3': 50} 63s
+900/2000 {'jobs': 900, 'tests': 900, 'skipped': 0, 'fails': 0, 'copies_ge1': 286, 'free': 423, 'c3': 53} 71s
+1000/2000 {'jobs': 1000, 'tests': 1000, 'skipped': 0, 'fails': 0, 'copies_ge1': 317, 'free': 462, 'c3': 58} 79s
+1100/2000 {'jobs': 1100, 'tests': 1100, 'skipped': 0, 'fails': 0, 'copies_ge1': 357, 'free': 516, 'c3': 65} 87s
+1200/2000 {'jobs': 1200, 'tests': 1200, 'skipped': 0, 'fails': 0, 'copies_ge1': 399, 'free': 570, 'c3': 70} 95s
+1300/2000 {'jobs': 1300, 'tests': 1300, 'skipped': 0, 'fails': 0, 'copies_ge1': 429, 'free': 617, 'c3': 73} 103s
+1400/2000 {'jobs': 1400, 'tests': 1400, 'skipped': 0, 'fails': 0, 'copies_ge1': 462, 'free': 665, 'c3': 81} 112s
+1500/2000 {'jobs': 1500, 'tests': 1500, 'skipped': 0, 'fails': 0, 'copies_ge1': 492, 'free': 722, 'c3': 86} 120s
+1600/2000 {'jobs': 1600, 'tests': 1600, 'skipped': 0, 'fails': 0, 'copies_ge1': 526, 'free': 767, 'c3': 97} 128s
+1700/2000 {'jobs': 1700, 'tests': 1700, 'skipped': 0, 'fails': 0, 'copies_ge1': 562, 'free': 809, 'c3': 104} 136s
+1800/2000 {'jobs': 1800, 'tests': 1800, 'skipped': 0, 'fails': 0, 'copies_ge1': 591, 'free': 859, 'c3': 107} 144s
+1900/2000 {'jobs': 1900, 'tests': 1900, 'skipped': 0, 'fails': 0, 'copies_ge1': 629, 'free': 911, 'c3': 108} 153s
+2000/2000 {'jobs': 2000, 'tests': 2000, 'skipped': 0, 'fails': 0, 'copies_ge1': 665, 'free': 969, 'c3': 112} 160s
+SUMMARY {'jobs': 2000, 'tests': 2000, 'skipped': 0, 'fails': 0, 'copies_ge1': 665, 'free': 969, 'c3': 112, 'secs': 160, 'mode': 'random', 'keys': ['1-small', '2-medium']}
