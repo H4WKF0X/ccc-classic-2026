@@ -103,3 +103,26 @@ threads, ≈ 8 hours). Afterwards run `~/.ccc-venv/bin/python tools/level6/colle
 2. **Day after:** cleaned up, rewrote the solver in Rust (6–10× faster), and built exact methods
    (CP-SAT on a line-coordinate model). These proved most medium cases optimal and found
    improvements in cases where every beam search, ours and the other teams', had stopped improving. Result: 14,526.
+
+## Live dashboard
+
+```bash
+python3 tools/dashboard/serve.py        # then open http://127.0.0.1:8765 (local only, standard library)
+```
+
+One page with: the score and how it changed since the contest end, the known leaderboard totals,
+proven-optimal cases and the gap to the lower bounds per file, every running job (CPU, RAM, progress
+from its log), the machine (cores, temperature, RAM, fans, battery), the Claude Code agents, a
+"needs attention" list (errors in logs, unmerged wins, uncommitted best, unanswered notes) and a
+per-case map + table. Leaderboard numbers and the contest-end score are in `tools/dashboard/config.json`.
+
+**Agents and scripts report to it** with `tools/dashboard/post.py` (appends to `work/dashboard/events.jsonl`):
+
+```bash
+python3 tools/dashboard/post.py --agent <name> --kind win "large case 96: 23 -> 22"   # kinds: info win question done error plan
+python3 tools/dashboard/post.py --notes                                              # unanswered notes from the human
+python3 tools/dashboard/post.py --agent <name> --ack <note id> "answer"              # answer a note
+```
+
+Post a `win` for every shorter program or new proof, `plan` when starting a long run, `done` at the
+end, `question` when the human has to decide. Check `--notes` now and then.

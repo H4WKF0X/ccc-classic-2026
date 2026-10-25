@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Level 6 Dashboard</title>
+<style>
+:root {
+  --bg: #0d1014; --panel: #151a20; --panel2: #1b2129; --line: #262e38; --text: #d9e0e8; --dim: #8592a3;
+  --faint: #56616f; --accent: #4fa3ff; --good: #3ccf7e; --warn: #f0b429; --bad: #ff5d5d; --note: #c38bff;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f6f8; --panel: #ffffff; --panel2: #f0f3f6; --line: #dde3ea; --text: #17202a; --dim: #5b6776;
+    --faint: #98a3b0; --accent: #1f6fd1; --good: #1b9e5a; --warn: #b7791f; --bad: #d64545; --note: #8a4fd1;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 var(--mono); }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--bg); z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+header .sub { color: var(--dim); }
+.live { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); margin-left: auto; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 6px var(--good); }
+.dot.stale { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
+main { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; padding: 14px 20px 40px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 0 0 10px;
+  display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.panel h2 .r { text-transform: none; letter-spacing: 0; color: var(--faint); font-weight: 400; }
+.c3 { grid-column: span 3; } .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; }
+.c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+@media (max-width: 1100px) { .c3, .c4, .c5, .c6, .c7, .c8 { grid-column: span 12; } }
+@media (max-width: 600px) { main { padding: 10px 16px 30px; } header { padding: 10px 16px; } }
+.big { font-size: 38px; font-weight: 700; line-height: 1; letter-spacing: -.02em; }
+.delta.good { color: var(--good); } .delta.bad { color: var(--bad); }
+.dim { color: var(--dim); } .faint { color: var(--faint); } .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+.files { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.file { background: var(--panel2); border-radius: 6px; padding: 8px 10px; }
+.file .n { font-size: 18px; font-weight: 700; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.bar > div { height: 100%; background: var(--good); }
+.kv { display: flex; justify-content: space-between; gap: 8px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.att { border-left: 3px solid var(--faint); padding: 4px 0 4px 10px; }
+.att.error { border-color: var(--bad); } .att.warn { border-color: var(--warn); } .att.question, .att.note { border-color: var(--note); }
+.att .t { font-weight: 600; } .att .x { color: var(--dim); word-break: break-word; white-space: pre-wrap; }
+.ladder { position: relative; height: 70px; margin: 18px 6px 4px; }
+.ladder .axis { position: absolute; left: 0; right: 0; top: 34px; height: 2px; background: var(--line); }
+.ladder .m { position: absolute; top: 26px; transform: translateX(-50%); text-align: center; white-space: nowrap; font-size: 11px; }
+.ladder .m i { display: block; width: 2px; height: 18px; margin: 0 auto; background: var(--dim); }
+.ladder .m.us i { background: var(--accent); width: 4px; } .ladder .m.us { color: var(--accent); font-weight: 700; }
+.ladder .m.up { top: -4px; } .ladder .m.up i { margin-top: 2px; }
+svg text { fill: var(--dim); font: 10px var(--mono); }
+.job, .agent { background: var(--panel2); border-radius: 6px; padding: 9px 11px; }
+.job .head, .agent .head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.job .name, .agent .name { font-weight: 700; }
+.pill { font-size: 10px; padding: 1px 7px; border-radius: 9px; border: 1px solid currentColor; text-transform: uppercase; letter-spacing: .05em; }
+.pill.working { color: var(--good); } .pill.quiet { color: var(--warn); } .pill.done { color: var(--faint); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.chip { font-size: 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--dim); font: 11px/1.4 var(--mono);
+  max-height: 160px; overflow: auto; background: var(--panel); padding: 6px 8px; border-radius: 4px; }
+details summary { cursor: pointer; color: var(--faint); font-size: 11px; margin-top: 4px; }
+.cores { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; align-items: end; height: 54px; }
+.cores div { background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; }
+.sys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; margin-top: 10px; }
+textarea, select, input, button { font: 12px var(--mono); color: var(--text); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
+textarea { width: 100%; min-height: 60px; resize: vertical; }
+button { cursor: pointer; background: var(--accent); color: #fff; border: none; font-weight: 600; }
+button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line); font-weight: 400; }
+.row { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+.feed { max-height: 520px; overflow: auto; }
+.ev { display: grid; grid-template-columns: 52px 92px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.ev .who { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev.win .x { color: var(--good); } .ev.question .x, .ev.note .x { color: var(--note); } .ev.error .x { color: var(--bad); }
+.ev.commit .who { color: var(--faint); }
+.strip { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0 12px; }
+.strip span { width: 11px; height: 11px; border-radius: 2px; cursor: pointer; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--dim); font-size: 11px; }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; background: var(--c); vertical-align: -1px; }
+.tablewrap { max-height: 520px; overflow: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--dim); cursor: pointer; font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+tr.hl td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#tip { position: fixed; pointer-events: none; background: var(--panel2); border: 1px solid var(--line); padding: 6px 8px;
+  border-radius: 5px; font-size: 11px; display: none; z-index: 10; white-space: pre; }
+.empty { color: var(--faint); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Level 6 · Nanofabricator</h1>
+  <span class="sub">CCC Classic · post-contest optimisation (unofficial)</span>
+  <span class="live"><span class="dot" id="dot"></span><span id="updated">connecting…</span></span>
+</header>
+<main>
+  <section class="panel c5" id="score"></section>
+  <section class="panel c4"><h2>Leaderboard <span class="r">lower is better</span></h2><div id="ladder"></div></section>
+  <section class="panel c3"><h2>Needs attention <span class="r" id="attn-n"></span></h2><div class="list" id="attention"></div></section>
+
+  <section class="panel c8"><h2>Score over time <span class="r" id="hist-r"></span></h2><div id="chart"></div></section>
+  <section class="panel c4"><h2>Machine <span class="r" id="sys-r"></span></h2><div id="system"></div></section>
+
+  <section class="panel c7"><h2>Running jobs <span class="r" id="jobs-r"></span></h2><div class="list" id="jobs"></div></section>
+  <section class="panel c5"><h2>Agents <span class="r" id="agents-r"></span></h2><div class="list" id="agents"></div></section>
+
+  <section class="panel c5">
+    <h2>Notes to Claude &amp; agents <span class="r">read via post.py --notes</span></h2>
+    <textarea id="note" placeholder="A hint, a decision, a question… (Ctrl+Enter sends)"></textarea>
+    <div class="row">
+      <select id="note-to"><option value="all">to: everyone</option><option value="main">to: main Claude</option></select>
+      <button id="send">Post</button><span class="faint" id="sent"></span>
+    </div>
+    <div class="list" id="notes" style="margin-top:12px"></div>
+  </section>
+  <section class="panel c7"><h2>Activity <span class="r">agent posts, notes, commits</span></h2><div class="feed" id="feed"></div></section>
+
+  <section class="panel c12">
+    <h2>Cases <span class="r" id="cases-r"></span></h2>
+    <div class="legend">
+      <span style="--c:var(--good)">proven optimal</span><span style="--c:#7fc97f">gap 1</span>
+      <span style="--c:var(--warn)">gap 2–4</span><span style="--c:#f07f29">gap 5–14</span><span style="--c:var(--bad)">gap ≥ 15 (loose bound)</span>
+      <span class="faint">click a square to find it in the table</span>
+    </div>
+    <div id="strips"></div>
+    <div class="row">
+      <select id="f-key"><option value="">all files</option><option>2-medium</option><option>3-large</option><option>4-enormous</option></select>
+      <select id="f-status"><option value="open">open only</option><option value="">all cases</option><option value="proven">proven only</option></select>
+      <input id="f-case" placeholder="case #" size="7">
+    </div>
+    <div class="tablewrap" style="margin-top:8px">
+      <table><thead><tr>
+        <th data-k="key">file</th><th data-k="case">case</th><th data-k="R">R</th><th data-k="count">copies</th>
+        <th data-k="cells">cells</th><th data-k="best">best</th><th data-k="lb">lower bound</th><th data-k="gap">gap</th>
+        <th data-k="windows">windows</th><th data-k="method">bound from</th>
+      </tr></thead><tbody id="tbody"></tbody></table>
+    </div>
+  </section>
+</main>
+<div id="tip"></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => n == null ? '–' : n.toLocaleString('en-US');
+const ago = s => s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 172800 ? `${(s / 3600).toFixed(1)}h` : `${Math.round(s / 86400)}d`;
+const hm = t => new Date(t * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false});
+const dayhm = t => new Date(t * 1000).toLocaleString([], {weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false});
+const KEYS = ['2-medium', '3-large', '4-enormous'];
+let S = null, lastOk = 0, sortK = 'gap', sortDir = -1, hlCase = null;
+const openDetails = new Set();
+
+function gapColor(c) {
+  if (c.proven) return 'var(--good)';
+  if (c.gap <= 1) return '#7fc97f';
+  if (c.gap <= 4) return 'var(--warn)';
+  if (c.gap <= 14) return '#f07f29';
+  return 'var(--bad)';
+}
+
+function keepOpen(root) {      // remember which <details> are open across re-renders
+  root.querySelectorAll('details[data-id]').forEach(d => {
+    if (openDetails.has(d.dataset.id)) d.open = true;
+    d.addEventListener('toggle', () => d.open ? openDetails.add(d.dataset.id) : openDetails.delete(d.dataset.id));
+  });
+}
+
+function renderScore() {
+  const end = S.contest_end.scores, endTotal = KEYS.reduce((a, k) => a + end[k], 0);
+  const d = S.total - endTotal;
+  const lbTotal = KEYS.reduce((a, k) => a + S.files[k].lb, 0);
+  let h = `<h2>Score <span class="r">medium + large + enormous</span></h2>
+    <div class="kv" style="align-items:flex-end"><div><div class="big">${fmt(S.total)}</div>
+    <div class="delta ${d <= 0 ? 'good' : 'bad'}" style="margin-top:6px">${d <= 0 ? '' : '+'}${fmt(d)} since contest end (${fmt(endTotal)})</div></div>
+    <div style="text-align:right" class="dim">proven lower bound<br><b style="color:var(--text)">${fmt(lbTotal)}</b><br>
+    <span class="faint">enormous bounds are weak</span></div></div><div class="files">`;
+  for (const k of KEYS) {
+    const f = S.files[k], dd = f.best - end[k];
+    h += `<div class="file"><div class="dim">${k}</div><div class="n">${fmt(f.best)}
+      <span class="delta ${dd <= 0 ? 'good' : 'bad'}" style="font-size:11px">${dd <= 0 ? '' : '+'}${dd}</span></div>
+      <div class="faint">lb ${fmt(f.lb)} · gap ${fmt(f.gap)}</div>
+      <div class="bar" title="proven optimal cases"><div style="width:${100 * f.proven / f.cases}%"></div></div>
+      <div class="faint">${f.proven}/${f.cases} proven optimal</div>
+      ${f.best !== f.committed ? `<div class="warn">uncommitted (${fmt(f.committed)} in git)</div>` : ''}</div>`;
+  }
+  $('score').innerHTML = h + '</div>';
+}
+
+function renderLadder() {
+  const pts = S.refs.map(r => ({...r})).concat([{name: 'us now', total: S.total, us: true}]);
+  const lo = Math.min(...pts.map(p => p.total)) - 40, hi = Math.max(...pts.map(p => p.total)) + 40;
+  pts.sort((a, b) => a.total - b.total);
+  let h = '<div class="ladder"><div class="axis"></div>';
+  pts.forEach((p, i) => {
+    const x = 100 * (p.total - lo) / (hi - lo);
+    h += `<div class="m ${p.us ? 'us' : ''} ${i % 2 ? 'up' : ''}" style="left:${x}%">${i % 2 ? `${esc(p.name)}<br>${fmt(p.total)}<i></i>` : `<i></i>${esc(p.name)}<br>${fmt(p.total)}`}</div>`;
+  });
+  h += '</div><div class="list" style="margin-top:22px">';
+  for (const r of S.refs) {
+    const d = S.total - r.total;
+    h += `<div class="kv"><span>${esc(r.name)} <span class="faint">${esc(r.note)}</span></span>
+      <span class="${d <= 0 ? 'good' : 'warn'}">${d <= 0 ? `${fmt(-d)} ahead` : `${fmt(d)} behind`}</span></div>`;
+  }
+  $('ladder').innerHTML = h + '</div>';
+}
+
+function renderAttention() {
+  const a = S.attention;
+  $('attn-n').textContent = a.length ? `${a.length}` : '';
+  $('attention').innerHTML = a.length ? a.map(x => `<div class="att ${x.level}"><div class="t">${esc(x.title)}</div><div class="x">${esc(x.text)}</div></div>`).join('')
+    : '<div class="empty">nothing — all good</div>';
+}
+
+function renderChart() {
+  const H = S.history.filter(p => p.t >= S.contest_end.t - 60);
+  const W = Math.max(320, $('chart').clientWidth), Ht = 190, pl = 52, pr = 12, pt = 10, pb = 24;
+  const t0 = H[0].t, t1 = Math.max(H[H.length - 1].t, t0 + 1);
+  const vs = H.map(p => p.total), refs = S.refs.map(r => r.total);
+  const span = Math.max(...vs, ...refs) - Math.min(...vs, ...refs);
+  const step = [10, 20, 25, 50, 100, 200, 500].find(st => span / st <= 5) || 1000;
+  const lo = Math.floor((Math.min(...vs, ...refs) - 5) / step) * step, hi = Math.ceil((Math.max(...vs, ...refs) + 5) / step) * step;
+  const X = t => pl + (W - pl - pr) * (t - t0) / (t1 - t0), Y = v => pt + (Ht - pt - pb) * (hi - v) / (hi - lo);
+  let s = `<svg width="${W}" height="${Ht}" viewBox="0 0 ${W} ${Ht}">`;
+  for (let v = lo; v <= hi; v += step) {
+    s += `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${pl - 6}" y="${Y(v) + 3}" text-anchor="end">${fmt(v)}</text>`;
+  }
+  for (const r of S.refs) s += `<line x1="${pl}" x2="${W - pr}" y1="${Y(r.total)}" y2="${Y(r.total)}" stroke="var(--note)" stroke-dasharray="3 4"/>
+    <text x="${W - pr - 4}" y="${Y(r.total) - 4}" text-anchor="end" style="fill:var(--note)">${esc(r.name)} ${r.total}</text>`;
+  const days = new Set();
+  for (const p of H) { const d = new Date(p.t * 1000).toDateString(); if (!days.has(d)) { days.add(d); s += `<text x="${X(p.t)}" y="${Ht - 6}">${dayhm(p.t)}</text>`; } }
+  // step line: the score stays until the next improvement
+  let path = '';
+  H.forEach((p, i) => { path += i ? `H${X(p.t)}V${Y(p.total)}` : `M${X(p.t)},${Y(p.total)}`; });
+  s += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+  H.forEach((p, i) => s += `<circle cx="${X(p.t)}" cy="${Y(p.total)}" r="${p.source === 'now' ? 4 : 3}" fill="var(--accent)" data-i="${i}" style="cursor:pointer"/>`);
+  $('chart').innerHTML = s + '</svg>';
+  $('hist-r').textContent = `${H.length} points since contest end`;
+  $('chart').querySelectorAll('circle').forEach(c => {
+    c.onmousemove = e => { const p = H[+c.dataset.i]; tip(e, `${dayhm(p.t)}  ${p.source}\ntotal ${fmt(p.total)}\n` + KEYS.map(k => `${k} ${fmt(p[k])}`).join('\n') + (p.subject ? `\n${p.subject.slice(0, 90)}` : '')); };
+    c.onmouseleave = () => tip();
+  });
+}
+
+function renderSystem() {
+  const y = S.system, mem = 1 - y.mem_avail / y.mem_total, cpu = y.temps.k10temp;
+  const avg = y.cores.length ? y.cores.reduce((a, b) => a + b, 0) / y.cores.length : 0;
+  $('sys-r').textContent = `up ${ago(y.uptime)}`;
+  $('system').innerHTML = `<div class="cores" title="per-thread CPU load">${y.cores.map(c => `<div style="height:${Math.max(2, c)}%"></div>`).join('')}</div>
+    <div class="sys">
+      <div class="kv"><span class="dim">CPU</span><span>${Math.round(avg)}%</span></div>
+      <div class="kv"><span class="dim">load</span><span>${y.load.join(' ')}</span></div>
+      <div class="kv"><span class="dim">CPU temp</span><span class="${cpu >= 97 ? 'bad' : cpu >= 90 ? 'warn' : ''}">${cpu ? cpu.toFixed(0) + ' °C' : '–'}</span></div>
+      <div class="kv"><span class="dim">GPU temp</span><span>${y.temps.amdgpu ? y.temps.amdgpu.toFixed(0) + ' °C' : '–'}</span></div>
+      <div class="kv"><span class="dim">RAM</span><span class="${y.mem_avail < 3 * 2 ** 30 ? 'bad' : ''}">${((y.mem_total - y.mem_avail) / 2 ** 30).toFixed(1)} / ${(y.mem_total / 2 ** 30).toFixed(0)} GB</span></div>
+      <div class="kv"><span class="dim">swap</span><span>${(y.swap_used / 2 ** 30).toFixed(1)} GB</span></div>
+      <div class="kv"><span class="dim">fans</span><span>${y.fans.join(' / ') || '–'} rpm</span></div>
+      <div class="kv"><span class="dim">battery</span><span>${y.battery ? `${y.battery.capacity}% ${esc(y.battery.status.toLowerCase())}` : '–'}</span></div>
+    </div><div class="bar" title="RAM used"><div style="width:${100 * mem}%;background:${mem > .85 ? 'var(--bad)' : 'var(--accent)'}"></div></div>
+    <div class="faint" style="margin-top:6px">The CPU regulates at 95 °C by design. Past crashes: OOM, then a hard freeze.</div>`;
+}
+
+function renderJobs() {
+  const J = S.jobs;
+  $('jobs-r').textContent = `${J.length} running · ${J.reduce((a, j) => a + j.cpu, 0)}% CPU`;
+  $('jobs').innerHTML = J.length ? J.map(j => {
+    const p = j.progress, el = S.now - j.started;
+    let bar = '';
+    if (p.total) bar = `<div class="bar"><div style="width:${100 * Math.min(1, p.done / p.total)}%;background:var(--accent)"></div></div><div class="faint">${p.done}/${p.total} cases done</div>`;
+    else if (p.budget) bar = `<div class="bar"><div style="width:${100 * Math.min(1, el / p.budget)}%;background:var(--accent)"></div></div><div class="faint">${ago(el)} of ${ago(p.budget)} budget</div>`;
+    const oc = p.outcomes ? Object.entries(p.outcomes).map(([k, v]) => `<span class="chip">${k.toLowerCase()} ${v}</span>`).join('') : '';
+    return `<div class="job"><div class="head"><span class="name">${esc(j.name)}</span><span class="dim">${j.cpu}% CPU · ${(j.rss / 2 ** 20).toFixed(0)} MB · ${j.threads} proc · ${ago(el)}</span>
+      ${p.wins ? `<span class="good">${p.wins} win${p.wins > 1 ? 's' : ''}</span>` : ''}</div>
+      <div class="faint" style="word-break:break-all">${esc(j.args)}</div>${bar}
+      ${p.current ? `<div>${esc(p.current)}</div>` : ''}${oc ? `<div class="chips">${oc}</div>` : ''}
+      ${p.lines && p.lines.length ? `<details data-id="job-${j.pid}"><summary>log ${esc(j.log)}</summary><pre>${esc(p.lines.join('\n'))}</pre></details>` : ''}</div>`;
+  }).join('') : '<div class="empty">nothing running — the CPU is idle</div>';
+  keepOpen($('jobs'));
+}
+
+function renderAgents() {
+  const A = S.agents, working = A.filter(a => a.status === 'working').length;
+  $('agents-r').textContent = `${working} working · ${A.length} total`;
+  $('agents').innerHTML = A.map(a => `<div class="agent"><div class="head"><span class="pill ${a.status}">${a.status}</span>
+      <span class="name">${esc(a.description || a.id)}</span><span class="faint">${a.tools} tool calls · ${fmt(a.output_tokens)} tokens out · last ${ago(a.idle)} ago</span></div>
+      ${a.status !== 'done' && a.last_tool ? `<div class="dim" style="margin-top:4px">▸ ${esc(a.last_tool)}</div>` : ''}
+      ${a.last_text ? `<details data-id="ag-${a.id}"><summary>last message</summary><pre>${esc(a.last_text)}</pre></details>` : ''}</div>`).join('')
+    || '<div class="empty">no agents</div>';
+  keepOpen($('agents'));
+  const sel = $('note-to'), have = new Set([...sel.options].map(o => o.value));
+  for (const a of A) if (a.status !== 'done' && !have.has(a.description)) sel.add(new Option(`to: ${a.description}`, a.description));
+}
+
+function renderNotes() {
+  const answers = {};
+  for (const e of S.events) if (e.ack) (answers[e.ack] ||= []).push(e);
+  $('notes').innerHTML = S.notes.slice().reverse().slice(0, 12).map(n => {
+    const a = answers[n.id] || [];
+    return `<div class="att ${a.length ? '' : 'note'}"><div class="t">${dayhm(n.t)} · to ${esc(n.to)} ${a.length ? '<span class="good">answered</span>' : '<span class="warn">open</span>'}</div>
+      <div class="x" style="color:var(--text)">${esc(n.text)}</div>${a.map(e => `<div class="x">↳ ${esc(e.agent)}: ${esc(e.text)}</div>`).join('')}</div>`;
+  }).join('') || '<div class="empty">no notes yet</div>';
+}
+
+function renderFeed() {
+  const items = [];
+  for (const e of S.events) if (!e.ack || e.text) items.push({t: e.t, who: e.agent, kind: e.kind, text: e.text});
+  for (const n of S.notes) items.push({t: n.t, who: 'you → ' + n.to, kind: 'note', text: n.text});
+  for (const c of S.commits) items.push({t: c.t, who: c.hash, kind: 'commit', text: c.subject});
+  items.sort((a, b) => b.t - a.t);
+  $('feed').innerHTML = items.slice(0, 120).map(i => `<div class="ev ${i.kind}"><span class="faint">${hm(i.t)}</span>
+    <span class="who" title="${esc(i.who)}">${esc(i.who)}</span><span class="x">${i.kind !== 'commit' && i.kind !== 'info' ? `<b>${i.kind}</b> ` : ''}${esc(i.text)}</span></div>`).join('');
+}
+
+function renderCases() {
+  const C = S.cases;
+  let h = '';
+  for (const k of KEYS) {
+    const cs = C.filter(c => c.key === k);
+    h += `<div class="dim" style="margin-top:8px">${k} <span class="faint">${cs.filter(c => c.proven).length}/${cs.length} proven · gap ${fmt(S.files[k].gap)}</span></div><div class="strip">` +
+      cs.map(c => `<span style="background:${gapColor(c)}" data-k="${k}" data-c="${c.case}"></span>`).join('') + '</div>';
+  }
+  $('strips').innerHTML = h;
+  $('strips').querySelectorAll('span[data-c]').forEach(sp => {
+    const c = C.find(x => x.key === sp.dataset.k && x.case === +sp.dataset.c);
+    sp.onmousemove = e => tip(e, `${c.key} case ${c.case}\nR=${c.R} copies=${c.count} cells=${c.cells}\nbest ${c.best} · lb ${c.lb} · gap ${c.gap}${c.proven ? ' (optimal)' : ''}${c.windows ? '\nwindows all checked' : ''}${c.unmerged ? '\nunmerged win!' : ''}`);
+    sp.onmouseleave = () => tip();
+    sp.onclick = () => { $('f-key').value = c.key; $('f-status').value = ''; $('f-case').value = c.case; hlCase = `${c.key}/${c.case}`; renderTable(); };
+  });
+  const open = C.filter(c => !c.proven).length;
+  $('cases-r').textContent = `${C.length - open}/${C.length} proven optimal · ${open} open`;
+  renderTable();
+}
+
+function renderTable() {
+  const k = $('f-key').value, st = $('f-status').value, cq = $('f-case').value.trim();
+  let rows = S.cases.filter(c => (!k || c.key === k) && (!st || (st === 'open') !== c.proven) && (!cq || String(c.case) === cq));
+  rows.sort((a, b) => {
+    const x = a[sortK], y = b[sortK];
+    return (x < y ? -1 : x > y ? 1 : 0) * sortDir || a.key.localeCompare(b.key) || a.case - b.case;
+  });
+  $('tbody').innerHTML = rows.slice(0, 600).map(c => `<tr class="${hlCase === `${c.key}/${c.case}` ? 'hl' : ''}">
+    <td>${c.key}</td><td>${c.case}</td><td>${c.R}</td><td>${c.count}</td><td>${c.cells}</td><td><b>${c.best}</b></td><td>${c.lb}</td>
+    <td style="color:${gapColor(c)}">${c.proven ? 'optimal' : c.gap}</td><td>${c.windows ? '✓' : c.unmerged ? '<span class="warn">unmerged</span>' : ''}</td>
+    <td class="faint">${esc(c.method)}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">no cases match</td></tr>';
+}
+
+function tip(e, text) {
+  const t = $('tip');
+  if (!e) { t.style.display = 'none'; return; }
+  t.textContent = text; t.style.display = 'block';
+  t.style.left = Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 8) + 'px';
+  t.style.top = Math.min(e.clientY + 14, innerHeight - t.offsetHeight - 8) + 'px';
+}
+
+function render() {
+  for (const f of [renderScore, renderLadder, renderAttention, renderChart, renderSystem, renderJobs, renderAgents, renderNotes, renderFeed, renderCases]) {
+    try { f(); } catch (err) { console.error(f.name, err); }
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state', {cache: 'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    S = await r.json(); lastOk = Date.now(); render();
+  } catch (err) { console.warn('poll failed', err); }
+}
+
+setInterval(() => {
+  const s = (Date.now() - lastOk) / 1000;
+  $('dot').classList.toggle('stale', !lastOk || s > 20);
+  $('updated').textContent = lastOk ? (s > 20 ? `server not answering · last update ${ago(s)} ago` : `live · updated ${Math.round(s)}s ago`) : 'connecting…';
+}, 1000);
+
+document.querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
+  sortDir = sortK === th.dataset.k ? -sortDir : (th.dataset.k === 'key' || th.dataset.k === 'case' ? 1 : -1); sortK = th.dataset.k; renderTable();
+});
+['f-key', 'f-status'].forEach(id => $(id).onchange = () => { hlCase = null; renderTable(); });
+$('f-case').oninput = () => renderTable();
+async function sendNote() {
+  const text = $('note').value.trim(); if (!text) return;
+  const r = await fetch('/api/note', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Dashboard': '1'},
+    body: JSON.stringify({text, to: $('note-to').value})});
+  if (r.ok) { $('note').value = ''; $('sent').textContent = 'posted'; setTimeout(() => $('sent').textContent = '', 3000); poll(); }
+  else $('sent').textContent = 'failed: ' + r.status;
+}
+$('send').onclick = sendNote;
+$('note').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendNote(); };
+addEventListener('resize', () => S && renderChart());
+poll(); setInterval(poll, 5000);
+</script>
+</body>
+</html>

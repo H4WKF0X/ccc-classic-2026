@@ -167,3 +167,9 @@ level N-1's code (`--from`) is often right.
 
 The platform is codingcontest.org (CatCoder is gone); see `docs/PLATFORM.md`. Output line endings
 are copied from the example (codingcontest.org uses LF).
+
+## Dashboard (this repo)
+
+`python3 tools/dashboard/serve.py` serves a live local dashboard (http://127.0.0.1:8765). Every agent
+working here reports to it with `python3 tools/dashboard/post.py --agent <name> --kind win|info|plan|done|question|error "text"`
+and reads the human's notes with `post.py --notes` (answer with `--ack <id>`). See docs/LEVEL6.md.

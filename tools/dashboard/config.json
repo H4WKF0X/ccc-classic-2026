@@ -1,0 +1,15 @@
+{
+  "port": 8765,
+  "title": "CCC Classic · Level 6 Nanofabricator",
+  "temp_warn": 98,
+  "contest_end": {
+    "t": 1792774800,
+    "scores": {"2-medium": 5814, "3-large": 4689, "4-enormous": 4088},
+    "note": "contest end: 5th Vienna, 17th world"
+  },
+  "leaderboard": [
+    {"name": "Tschech", "total": 14362, "note": "#1 world"},
+    {"name": "Krautl", "total": 14499, "note": "#1 Vienna, #5 world"},
+    {"name": "us at contest end", "total": 14591, "note": "#5 Vienna, #17 world"}
+  ]
+}

@@ -94,6 +94,7 @@ def main():
     ap.add_argument('--rust-threads', type=int, default=8)
     ap.add_argument('--cpsat-workers', type=int, default=4)
     ap.add_argument('--key', default='3-large', help='input file, e.g. 3-large or 4-enormous')
+    ap.add_argument('--no-windows', action='store_true', help='Rust beam only (no exact windows)')
     a = ap.parse_args()
     global KEY
     KEY = a.key
@@ -134,12 +135,14 @@ def main():
         env = dict(os.environ, L6_SEED_DIR=seed_dir, CCC_THREADS=str(a.rust_threads), L6_SEED=str(rnd))
         rust = subprocess.Popen(['nice', '-n', '10', 'cargo', 'ccc', 'run', '6', rin, rout, '--budget', str(secs)],
                                 cwd=ROOT, env=env, stdout=open(f'{od}/rust_r{rnd}.log', 'w'), stderr=subprocess.STDOUT)
-        cp = subprocess.Popen(['nice', '-n', '10', 'timeout', str(secs), PY, '-u', f'{TOOLS}/improve.py', KEY,
+        cp = None if a.no_windows else subprocess.Popen(['nice', '-n', '10', 'timeout', str(secs), PY, '-u', f'{TOOLS}/improve.py', KEY,
                                '--cases', ','.join(map(str, win_cases)),
                                '--maxlen', '30', '--secs', '60',
                                '--workers', str(a.cpsat_workers)],
                               cwd=TOOLS, stdout=open(f'{od}/improve_r{rnd}.log', 'w'), stderr=subprocess.STDOUT)
-        rust.wait(); cp.wait()
+        rust.wait()
+        if cp:
+            cp.wait()
         record_windows_done(od, f'{od}/improve_r{rnd}.log', wdone)
         # map the Rust programs back into a full large file
         if os.path.exists(rout):
