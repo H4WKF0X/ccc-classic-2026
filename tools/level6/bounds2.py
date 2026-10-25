@@ -52,14 +52,24 @@ def known_bounds(key):
                     put(c, kind, int(a), b)
                 for a, b in json.loads(r[kind + 'ub'] or '{}').items():
                     put(c, kind, int(a), b, up=True)
-    p = os.path.join(RES, f'close2_{key}.jsonl')
-    if os.path.exists(p):
+    jsonls = [f'close2_{key}.jsonl'] + (['close_medium.jsonl', 'close_medium2.jsonl'] if key == '2-medium' else [])
+    for name in jsonls:
+        p = os.path.join(RES, name)
+        if not os.path.exists(p):
+            continue
         for line in open(p):
             d = json.loads(line)
+            kind = d.get('kind', 'W')          # close_medium.jsonl only asked W questions
             if d['status'] == 'INFEASIBLE':
-                put(d['case'], d['kind'], d['k'], d['T'] + 1)
+                put(d['case'], kind, d['k'], d['T'] + 1)
             elif d['status'] == 'FEASIBLE':
-                put(d['case'], d['kind'], d['k'], d['T'], up=True)
+                put(d['case'], kind, d['k'], d['T'], up=True)
+    p = os.path.join(RES, f'exact_{key}.csv')       # whole-program proofs: F_n >= T+1
+    if os.path.exists(p):
+        cases, _ = load(key)
+        for r in csv.DictReader(open(p)):
+            if r.get('status') == 'INFEASIBLE':
+                c = int(r['case']); put(c, 'F', cases[c][2], int(r['T']) + 1)
     return out
 
 
