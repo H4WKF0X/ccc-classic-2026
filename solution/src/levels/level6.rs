@@ -487,6 +487,29 @@ mod beam {
         }
     }
 
+    impl Params {
+        /// Applies overrides like `"hp=40,wd=10"` (panics on unknown names: they are typed by hand).
+        pub fn with_overrides(mut self, spec: &str) -> Params {
+            for kv in spec.split(',').filter(|s| !s.is_empty()) {
+                let (k, v) = kv.split_once('=').expect("override is name=value");
+                let v: i64 = v.trim().parse().expect("override value is an integer");
+                match k.trim() {
+                    "kcap" => self.kcap = v as usize,
+                    "pool" => self.pool = v as usize,
+                    "wa" => self.wa = v,
+                    "wd" => self.wd = v,
+                    "hp" => self.hp = v,
+                    "tn" => self.tn = v as u32,
+                    "nz" => self.nz = v as u32,
+                    "tail" => self.tail_pct = v as usize,
+                    "h2" => self.h2 = v,
+                    _ => panic!("unknown beam parameter {k}"),
+                }
+            }
+            self
+        }
+    }
+
     /// Counters of one attempt (for benchmarks).
     #[derive(Clone, Copy, Debug, Default)]
     pub struct Stats {
@@ -1227,6 +1250,17 @@ mod opt {
     /// widths 800 / 3000 / 12000), and the alternation keeps restarts frequent.
     const WIDTHS: [usize; 5] = [800, 1500, 3000, 6000, 12000];
 
+    /// Alternative beam knobs for a share of the attempts, e.g. `L6_ALT="hp=40" L6_ALT_PCT=33`
+    /// (hp > 0 lets matter appear on the halo in between, which the default search never does).
+    fn alt_params() -> &'static Option<(String, usize)> {
+        static ALT: std::sync::OnceLock<Option<(String, usize)>> = std::sync::OnceLock::new();
+        ALT.get_or_init(|| {
+            let spec = std::env::var("L6_ALT").ok().filter(|s| !s.is_empty())?;
+            Params::default().with_overrides(&spec); // validate once, up front
+            Some((spec, env_u64("L6_ALT_PCT").unwrap_or(33) as usize))
+        })
+    }
+
     fn width(attempt: u64) -> usize {
         let n = attempt as usize;
         WIDTHS[if n < WIDTHS.len() { n } else { WIDTHS.len() - 2 + (n - WIDTHS.len()) % 2 }]
@@ -1304,7 +1338,14 @@ mod opt {
                 return;
             }
             let sym = sym::ALL[s];
-            let prm = Params { width, nz: [0, 0, 1, 2][draw(4)], ..Params::default() };
+            let mut prm = Params { width, nz: [0, 0, 1, 2][draw(4)], ..Params::default() };
+            let mut alt = None;
+            if let Some((spec, pct)) = alt_params() {
+                if draw(100) < *pct {
+                    prm = prm.with_overrides(spec);
+                    alt = Some(spec);
+                }
+            }
             let search_seed = rng;
             let geo = self.geo(s);
             let fwd: Vec<Action> = prefix.iter().map(|&a| sym.forward(a)).collect();
@@ -1317,17 +1358,21 @@ mod opt {
             let Some(rest) = found else { return };
             let mut prog = prefix;
             prog.extend(rest.iter().map(|&a| sym.back(a)));
-            self.offer(prog, sym, width);
+            if self.offer(prog, sym, width) {
+                if let Some(spec) = alt {
+                    eprintln!("l6 alt: case {} improved to {} lines with {spec}", self.index, self.best.as_ref().map_or(0, |b| b.len()));
+                }
+            }
         }
 
         /// Keeps `prog` if it is valid (exact bitset simulation and `model.rs`) and shorter.
-        fn offer(&mut self, prog: Vec<Action>, sym: Sym, width: usize) {
+        fn offer(&mut self, prog: Vec<Action>, sym: Sym, width: usize) -> bool {
             let count = self.case.count;
             let Some(len) = sim::finish_len(self.geo(0), &prog, count) else {
                 panic!("case {}: beam result does not validate ({sym:?})", self.index)
             };
             if self.best.as_ref().is_some_and(|b| b.len() <= len) {
-                return;
+                return false;
             }
             let lines: Vec<[u8; 6]> = prog[..len].iter().map(|&a| unpack(a)).collect();
             assert!(count_accepted(&self.case.pattern, &lines) >= count, "case {}: simulators disagree", self.index);
@@ -1339,6 +1384,7 @@ mod opt {
             );
             self.best = Some(prog[..len].to_vec());
             self.improved += 1;
+            true
         }
     }
 
@@ -1591,23 +1637,7 @@ mod tests {
         }
         let t0 = std::time::Instant::now();
         // Parameter overrides, e.g. L6_QUAL_PRM="hp=40,wd=10".
-        let mut base = beam::Params { width, ..Default::default() };
-        for kv in std::env::var("L6_QUAL_PRM").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
-            let (k, v) = kv.split_once('=').unwrap();
-            let v: i64 = v.parse().unwrap();
-            match k {
-                "kcap" => base.kcap = v as usize,
-                "pool" => base.pool = v as usize,
-                "wa" => base.wa = v,
-                "wd" => base.wd = v,
-                "hp" => base.hp = v,
-                "tn" => base.tn = v as u32,
-                "nz" => base.nz = v as u32,
-                "tail" => base.tail_pct = v as usize,
-                "h2" => base.h2 = v,
-                _ => panic!("unknown parameter {k}"),
-            }
-        }
+        let base = beam::Params { width, ..Default::default() }.with_overrides(&std::env::var("L6_QUAL_PRM").unwrap_or_default());
         let res = harness::par::map_threads(8, &items, |(_, _, count, geo, seed)| {
             let prm = base.clone();
             let t = std::time::Instant::now();
