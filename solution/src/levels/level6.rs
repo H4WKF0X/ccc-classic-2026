@@ -1699,21 +1699,25 @@ mod tests {
                 items.push((key.to_string(), case.trim().to_string(), w, c.count, Geo::new(&c.pattern)));
             }
         }
-        let res = harness::par::map_threads(threads, &items, |(_, _, w, count, geo)| {
+        // every finished attempt is appended at once, so progress is visible and a crash loses nothing
+        let out = std::sync::Mutex::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(std::env::var("L6_MEAS_OUT").expect("L6_MEAS_OUT"))
+                .unwrap(),
+        );
+        harness::par::map_threads(threads, &items, |(k, c, w, count, geo)| {
             let prm = beam::Params { width: *w, ..Default::default() };
             let t = std::time::Instant::now();
             let (prog, _) = beam::search(geo, &State::start(geo), *count, 999, &prm, 0, &|| false);
             let text = prog.map_or(String::new(), |p| {
                 p.iter().map(|&a| unpack(a).iter().map(|&c| c as char).collect::<String>()).collect::<Vec<_>>().join(";")
             });
-            (t.elapsed().as_secs_f64(), text)
+            use std::io::Write;
+            let line = format!("{k} {c} {w} {:.2} {text}\n", t.elapsed().as_secs_f64());
+            out.lock().unwrap().write_all(line.as_bytes()).unwrap();
         });
-        let out: String = items
-            .iter()
-            .zip(&res)
-            .map(|((k, c, w, _, _), (secs, text))| format!("{k} {c} {w} {secs:.2} {text}\n"))
-            .collect();
-        std::fs::write(std::env::var("L6_MEAS_OUT").expect("L6_MEAS_OUT"), out).unwrap();
     }
 
     #[test]
