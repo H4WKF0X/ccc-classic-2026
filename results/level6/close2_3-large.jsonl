@@ -1,0 +1,4 @@
+{"case": 144, "kind": "F", "k": 2, "T": 12, "status": "FEASIBLE", "secs": 53.6}
+{"case": 144, "kind": "F", "k": 3, "T": 17, "status": "UNKNOWN", "secs": 120.2}
+{"case": 144, "kind": "W", "k": 4, "T": 20, "status": "UNKNOWN", "secs": 66.3}
+{"case": 12, "kind": "W", "k": 1, "T": 5, "status": "INFEASIBLE", "secs": 22.4}

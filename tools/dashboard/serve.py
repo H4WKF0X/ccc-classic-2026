@@ -70,10 +70,15 @@ def lower_bounds():
     rows = {}
     for r in csv.DictReader(read(f'{RES}/bounds.csv').splitlines()):
         rows[(r['file'], int(r['case']))] = r
-    for r in csv.DictReader(read(f'{RES}/bounds_medium2.csv').splitlines()):
-        row = rows.get(('2-medium', int(r['case'])))
-        if row is not None and r.get('lb') and int(r['lb']) > int(row['lb'] or 0):
-            row['lb'] = r['lb']; row['method'] = 'satmodel2'
+    newer = [('2-medium', f'{RES}/bounds_medium2.csv')] + [(k, f'{RES}/bounds2_{k}.csv') for k in KEYS]
+    for key, path in newer:
+        for r in csv.DictReader(read(path).splitlines()):
+            try:
+                row = rows.get((key, int(r['case'])))
+                if row is not None and r.get('lb') and int(r['lb']) > int(row['lb'] or 0):
+                    row['lb'] = r['lb']; row['method'] = 'satmodel2'
+            except (KeyError, ValueError):
+                pass                    # file being rewritten right now
     return rows
 
 
