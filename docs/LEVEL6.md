@@ -27,7 +27,7 @@ Known leaderboard totals from the contest: Tschech 14,362 (1st world), Krautl 14
 5th world). Our 14,356 was uploaded to a training game of the same contest on 2026-10-25 (all six
 levels correct); it is post-contest and unofficial.
 
-- Medium can improve by at most 15 lines (open: 132, 161, 167, 197).
+- Medium can improve by at most 15 lines (open: 132, 161, 167, 197; for 161 see the tight-chain search below).
 - The large and enormous gaps are mostly *loose bounds* on big patterns, not necessarily real room.
 - **What found the last 170 lines: beam width.** The plain beam keeps getting better with width on
   big patterns (from scratch, large: +342 lines above our best at width 800, +117 at 20,000, +60 at
@@ -134,6 +134,17 @@ on the 21 biggest open patterns gave −4. 93 big open patterns were never tried
 - exact cycles (`cyc.py`): undecided at the copy lengths where there is room;
 - halo matter in the beam (`L6_ALT="hp=40"`): 0 wins in two rounds;
 - the beam at width ≤ 12,000 (the old optimiser): stalled.
+
+**Medium 161 (best 51, bound 50), tight-chain search (`tight.py`, 2026-10-26).** A 50-line program
+must have its first copy at exactly tick 8 and then a copy every 7 ticks (F1 = 8 and W1 = 7 are
+proven), so `tight.py` enumerates, layer by layer, every emitter configuration such a chain can be
+in after each copy (twin-swapped configurations merged; 14 processes). Layer 1: 137 configurations
+(33 min, 3 of 27 enumerations hit the 30-minute limit); layer 2: 161 configurations (2 h, 14 of 137
+hit the limit). Stopped there: the layers do not shrink, so a 50-line chain may well exist, but each
+layer costs about 2 hours and a proof would also need the timed-out enumerations redone.
+**Next step if picked up again:** a depth-first search for *one* chain (one quick solve per copy,
+backtrack on dead ends, 14 independent random searches) instead of enumerating every configuration.
+It can only find a 50-line program, not prove 51 optimal; the layered search remains the way to a proof.
 
 Lower bounds: `bounds2.py` climbs W_k / F_j with `satmodel2` (cheap enormous pass: `--secs 45
 --case-budget 90`, about 1.5 hours). Results land in `results/level6/bounds2_<key>.csv`, which the
