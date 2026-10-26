@@ -19,15 +19,15 @@ medium + large + enormous count on the website.
 | | medium | large | enormous | total |
 |---|---:|---:|---:|---:|
 | contest end (5th Vienna, 17th world) | 5,814 | 4,689 | 4,088 | 14,591 |
-| now, `results/level6/best/` | **5,801** | **4,600** | **3,954** | **14,355** |
+| now, `results/level6/best/` | **5,800** | **4,600** | **3,954** | **14,354** |
 | proven lower bound | 5,787 | 3,590 | 1,792 | |
-| proven optimal cases | 207/210 | 112/190 | 15/140 | |
+| proven optimal cases | 208/210 | 112/190 | 15/140 | |
 
 Known leaderboard totals from the contest: Tschech 14,362 (1st world), Krautl 14,499 (1st Vienna,
 5th world). Our 14,355 was uploaded to a training game of the same contest on 2026-10-25 (all six
 levels correct); it is post-contest and unofficial.
 
-- Medium can improve by at most 14 lines (open: 132, 167, 197). 161 was closed by the depth-first chain search below.
+- Medium can improve by at most 13 lines (open: 132, 197). 161 and 167 were closed by the depth-first chain search below.
 - The large and enormous gaps are mostly *loose bounds* on big patterns, not necessarily real room.
 - **What found the last 170 lines: beam width.** The plain beam keeps getting better with width on
   big patterns (from scratch, large: +342 lines above our best at width 800, +117 at 20,000, +60 at
@@ -142,7 +142,7 @@ in after each copy (twin-swapped configurations merged; 14 processes). Layer 1: 
 (33 min, 3 of 27 enumerations hit the 30-minute limit); layer 2: 161 configurations (2 h, 14 of 137
 hit the limit). Stopped there: the layers do not shrink, so a 50-line chain may well exist, but each
 layer costs about 2 hours and a proof would also need the timed-out enumerations redone.
-**Solved the same day with `dfs.py`:** a depth-first search for *one* chain (14 workers, random seeds, shared proven dead ends) found a 50-line program after 7 solves in a few minutes: 161 is 50 lines and optimal (lb 50). The idea, a depth-first search for *one* chain (one quick solve per copy,
+**Solved the same day with `dfs.py`:** a depth-first search for *one* chain (14 workers, random seeds, shared proven dead ends) found a 50-line program after 7 solves in 2.5 minutes: 161 is 50 lines and optimal (lb 50). Medium 167 the same way: 121 = 9 + 16 x 7 lines, found after about 50 minutes, optimal. The idea, a depth-first search for *one* chain (one quick solve per copy,
 backtrack on dead ends, 14 independent random searches) instead of enumerating every configuration.
 It can only find a 50-line program, not prove 51 optimal; the layered search remains the way to a proof.
 
