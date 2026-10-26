@@ -1,4 +1,8 @@
-"""Depth-first search for ONE tight chain (see tight.py): a program of exactly lb = F1 + (n-1) W1 lines.
+"""Depth-first search for ONE short chain of copies: a program of at most `target` lines (default best-1).
+
+Tight case (target = F1 + (n-1) W1, see tight.py): every copy has its minimal length.  With slack, a
+copy may be longer: each node tries lengths from the minimum upwards, as long as the remaining copies
+still fit (each later copy needs at least W1).  Dead ends are (configuration, copies left, ticks left).
 
 Instead of enumerating every configuration of every layer, each worker walks one chain: from the
 current configuration it asks for *one* copy of exactly the tight length (first copy F1 ticks from the
@@ -25,12 +29,18 @@ WORK = os.path.join(bounds2.ROOT, 'work', 'level6', 'bounds2')
 
 
 def read_dead(path):
-    dead = set()
+    """[(copies_left, budget_left, canonical key)]: from that configuration no chain of that many
+    copies fits into that many ticks (so neither into fewer)."""
+    dead = []
     if os.path.exists(path):
         for line in open(path):
-            k, key = json.loads(line)
-            dead.add((k, tuple(map(tuple, key))))
+            k, bud, key = json.loads(line)
+            dead.append((k, bud, tuple(map(tuple, key))))
     return dead
+
+
+def dead_keys(dead, k, budget):
+    return {key for (kk, bud, key) in dead if kk == k and bud >= budget}
 
 
 def one_copy(lg, T, start, known, exclude, secs, seed):
@@ -57,59 +67,71 @@ def one_copy(lg, T, start, known, exclude, secs, seed):
     return 'FEASIBLE', states
 
 
-def worker(wid, a, n, f1, w1, known, deadline, dead_path, stop_path):
+def worker(wid, a, n, f1, w1, target, known, deadline, dead_path, stop_path):
     rnd = random.Random(1000 + wid)
     cases, _ = load(a.key)
     r, g, _ = cases[a.case]
     lg = LineGeo(r, g)
-    # stack[i] = (config after i copies (None = real start), segment states that led there,
-    #             canonical end keys already tried from here)
-    stack = [(None, None, set())]
+    # node = [config (None = real start), segment states that led here, ticks used so far,
+    #         current copy length L being tried, {L: canonical end keys tried with that L}, clean]
+    stack = [[None, None, 0, f1, {}, True]]
     best_depth = 0; solves = 0
     while time.time() < deadline and not os.path.exists(stop_path):
         depth = len(stack) - 1
-        cfg, _, tried = stack[-1]
-        remaining = n - depth
+        node = stack[-1]
+        cfg, _, used, L, tried, clean = node
+        left = n - depth                                   # copies still to make
+        budget = target - used                             # ticks still allowed
+        lmax = budget - (left - 1) * w1                    # longest this copy may be
+        if L > lmax:
+            # every length failed: dead for `left` copies within `budget` ticks, if proven
+            if clean and depth > 0:
+                with open(dead_path, 'a') as f:
+                    f.write(json.dumps([left, budget, [list(x) for x in cfg_key(canon(cfg))]]) + '\n')
+            if depth == 0:
+                print(f'worker {wid}: {"no chain exists" if clean else "root exhausted (not proven)"}', flush=True)
+                if clean:
+                    open(stop_path, 'w').write('none')
+                return
+            stack.pop()
+            if not clean:
+                stack[-1][5] = False
+            continue
+        tr = tried.setdefault(L, set())
         dead = read_dead(dead_path)
-        # children that are dead for (remaining - 1) further copies are excluded too
-        excl = set(tried) | {key for (k, key) in dead if k == remaining - 1}
-        T = f1 if depth == 0 else w1
-        s, states = one_copy(lg, T, cfg, known, excl, a.secs, rnd.randrange(1 << 30))
+        excl = tr | dead_keys(dead, left - 1, budget - L)
+        s, states = one_copy(lg, L, cfg, known, excl, a.secs, rnd.randrange(1 << 30))
         solves += 1
         if s == 'FEASIBLE':
-            end = states[T]
-            tried.add(cfg_key(canon(end)))
-            stack.append((end, states, set()))
+            end = states[L]
+            tr.add(cfg_key(canon(end)))
+            stack.append([end, states, used + L, w1, {}, True])
             if len(stack) - 1 > best_depth:
                 best_depth = len(stack) - 1
-                print(f'worker {wid}: reached copy {best_depth}/{n} ({solves} solves)', flush=True)
+                print(f'worker {wid}: reached copy {best_depth}/{n} at tick {used + L} ({solves} solves)', flush=True)
             if len(stack) - 1 == n:
                 prog = []
-                for _, seg, _ in stack[1:]:
-                    prog += _instructions(lg, seg)
+                for nd in stack[1:]:
+                    prog += _instructions(lg, nd[1])
                 m = simulate(lg.geo, prog, n)
                 print(f'worker {wid}: FOUND chain, replay -> {m} lines', flush=True)
-                if m is not None and m <= f1 + (n - 1) * w1:
+                if m is not None and m <= target:
                     with open(f'{bounds2.RES}/improved/{a.key}_{a.case}.txt', 'w') as o:
                         o.write('\n'.join(' '.join(l) for l in prog[:m]) + '\n')
                     open(stop_path, 'w').write(str(m))
                     bounds2.post('win', f'{a.key} case {a.case}: {m} lines (depth-first chain search, not merged yet)')
                     return
-                stack.pop()     # does not replay (should not happen): treat as dead end
+                stack.pop()
             continue
-        proven_dead_children = {key for (k, key) in read_dead(dead_path) if k == remaining - 1}
-        if s == 'INFEASIBLE' and depth > 0 and tried <= proven_dead_children:
-            # no continuation except proven dead ends: this configuration is dead with `remaining`
-            # copies left (children abandoned after a timeout are not proven, so then no mark)
-            with open(dead_path, 'a') as f:
-                f.write(json.dumps([remaining, [list(x) for x in cfg_key(canon(cfg))]]) + '\n')
-        if depth == 0:
-            if s == 'INFEASIBLE':
-                print(f'worker {wid}: every first copy is a dead end -> no chain exists', flush=True)
-                open(stop_path, 'w').write('none')
-                return
-            continue        # UNKNOWN at the root: just try again with another seed
-        stack.pop()         # backtrack (the child key stays in the parent's `tried`)
+        if s == 'INFEASIBLE':
+            # no (live) copy of exactly L ticks: was every excluded child a proven dead end?
+            if not tr <= dead_keys(read_dead(dead_path), left - 1, budget - L):
+                node[5] = False
+            node[3] = L + 1
+            continue
+        # UNKNOWN: give up this length here (not proven)
+        node[5] = False
+        node[3] = L + 1
     print(f'worker {wid}: stopped, deepest copy {best_depth}/{n}, {solves} solves', flush=True)
 
 
@@ -120,22 +142,28 @@ def main():
     ap.add_argument('--procs', type=int, default=14)
     ap.add_argument('--secs', type=float, default=120, help='time limit per solve')
     ap.add_argument('--minutes', type=float, default=60)
+    ap.add_argument('--target', type=int, default=None, help='program length to look for (default best-1)')
     a = ap.parse_args()
     cases, best = load(a.key)
     n = cases[a.case][2]
     kb = bounds2.known_bounds(a.key)[a.case]
     F, W = satmodel2.closure(kb['F'], kb['W'], n)
-    f1, w1 = F[1], W[1]
-    print(f'{a.key} case {a.case}: n={n} best={len(best[a.case])} looking for a chain of '
-          f'{f1} + {n - 1} x {w1} = {f1 + (n - 1) * w1} lines, {a.procs} workers, {a.minutes} min', flush=True)
+    f1, w1 = F.get(1, 1), W.get(1, 1)
+    target = a.target or len(best[a.case]) - 1
+    slack = target - (f1 + (n - 1) * w1)
+    print(f'{a.key} case {a.case}: n={n} best={len(best[a.case])} looking for a program of {target} lines '
+          f'(bound {f1} + {n - 1} x {w1}, slack {slack}), {a.procs} workers, {a.minutes} min', flush=True)
+    if slack < 0:
+        print('target is below the proven bound: nothing to search', flush=True)
+        return
     os.makedirs(WORK, exist_ok=True)
-    dead_path = f'{WORK}/dfs_{a.key}_{a.case}_dead.jsonl'
+    dead_path = f'{WORK}/dfs_{a.key}_{a.case}_dead2.jsonl'
     stop_path = f'{WORK}/dfs_{a.key}_{a.case}.stop'
     if os.path.exists(stop_path):
         os.remove(stop_path)
     known = {'F': kb['F'], 'W': kb['W']}
     deadline = time.time() + a.minutes * 60
-    ps = [mp.Process(target=worker, args=(w, a, n, f1, w1, known, deadline, dead_path, stop_path))
+    ps = [mp.Process(target=worker, args=(w, a, n, f1, w1, target, known, deadline, dead_path, stop_path))
           for w in range(a.procs)]
     for p in ps:
         p.start()
@@ -146,7 +174,7 @@ def main():
             last = time.time()
             d = read_dead(dead_path)
             by_k = {}
-            for k, _ in d:
+            for k, _, _ in d:
                 by_k[k] = by_k.get(k, 0) + 1
             print(f'status: {len(d)} dead configurations known (by copies left: {dict(sorted(by_k.items()))})', flush=True)
         if os.path.exists(stop_path):
