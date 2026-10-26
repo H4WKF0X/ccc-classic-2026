@@ -24,7 +24,7 @@ medium + large + enormous count on the website.
 | proven optimal cases | 208/210 | 112/190 | 15/140 | |
 
 Known leaderboard totals from the contest: Tschech 14,362 (1st world), Krautl 14,499 (1st Vienna,
-5th world). Our 14,355 was uploaded to a training game of the same contest on 2026-10-25 (all six
+5th world). Our 14,356 was uploaded to a training game of the same contest on 2026-10-25 (all six
 levels correct); it is post-contest and unofficial.
 
 - Medium can improve by at most 13 lines (open: 132, 197). 161 and 167 were closed by the depth-first chain search below.
