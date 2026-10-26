@@ -22,3 +22,4 @@
 {"case": 151, "kind": "F", "k": 3, "T": 17, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
 {"case": 93, "kind": "F", "k": 3, "T": 18, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
 {"case": 34, "kind": "F", "k": 3, "T": 19, "status": "UNKNOWN", "secs": 600.3, "method": "attack"}
+{"case": 144, "kind": "F", "k": 5, "T": 27, "status": "INFEASIBLE", "secs": 2700, "method": "dfs-exhaustive (tight chain 7 + 4 x 5, 79 proven dead configurations)"}

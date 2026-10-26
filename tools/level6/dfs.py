@@ -90,8 +90,14 @@ def worker(wid, a, n, f1, w1, target, known, deadline, dead_path, stop_path):
                     f.write(json.dumps([left, budget, [list(x) for x in cfg_key(canon(cfg))]]) + '\n')
             if depth == 0:
                 print(f'worker {wid}: {"no chain exists" if clean else "root exhausted (not proven)"}', flush=True)
-                if clean:
+                if clean and not os.path.exists(stop_path):
+                    # exhaustive and every dead end proven: no program of `target` lines exists
                     open(stop_path, 'w').write('none')
+                    with open(f'{bounds2.RES}/close2_{a.key}.jsonl', 'a') as f:
+                        f.write(json.dumps(dict(case=a.case, kind='F', k=n, T=target, status='INFEASIBLE',
+                                                method='dfs-exhaustive')) + '\n')
+                    bounds2.post('win', f'{a.key} case {a.case}: no program with {target} lines '
+                                        f'(exhaustive chain search) -> {target + 1} is optimal')
                 return
             stack.pop()
             if not clean:
