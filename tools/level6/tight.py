@@ -24,6 +24,23 @@ import bounds2, satmodel2
 from ortools.sat.python import cp_model
 
 
+SWAPS = [tuple(a for a in range(3) if mask >> a & 1) for mask in range(8)]
+
+
+def swap(cfg, axes):
+    """Exchange the states of the twin emitters a and a+3 for every axis in `axes`."""
+    q, on = list(cfg[0]), list(cfg[1])
+    for a in axes:
+        q[a], q[a + 3] = q[a + 3], q[a]
+        on[a], on[a + 3] = on[a + 3], on[a]
+    return (q, on)
+
+
+def canon(cfg):
+    """Twin-symmetry representative (twins e, e+3 have identical dynamics, lines and start)."""
+    return min((swap(cfg, ax) for ax in SWAPS), key=lambda c: (c[0], c[1]))
+
+
 class Built(Exception):
     def __init__(self, m, V):
         self.m, self.V = m, V
@@ -60,6 +77,9 @@ def enum_ends(args):
         sol.parameters.num_workers = 1
         st = sol.Solve(m)
         if st == cp_model.INFEASIBLE:
+            if start is None:
+                print(f'    enumeration from real start: complete with {len(out)} end configs '
+                      f'(last solve {sol.WallTime():.1f}s, total {time.time() - t0:.0f}s)', flush=True)
             break
         if st not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             complete = False; break
@@ -69,17 +89,19 @@ def enum_ends(args):
             states.append((q, [bool(sol.Value(V['on'][e][t])) for e in range(6)]))
         end = states[T]
         out.append((end, states))
-        if len(out) % 100 == 0:
+        if start is None or len(out) % 10 == 0:
             print(f'    enumeration from {"real start" if start is None else "a config"}: '
-                  f'{len(out)} end configs so far, {time.time() - t0:.0f}s', flush=True)
-        # block this end configuration
-        m.AddBoolOr([V['pos'][e][T][end[0][e]].Not() for e in range(6)] +
-                    [V['on'][e][T].Not() if end[1][e] else V['on'][e][T] for e in range(6)])
+                  f'{len(out)} end configs so far, last solve {sol.WallTime():.1f}s, '
+                  f'total {time.time() - t0:.0f}s', flush=True)
+        # block this end configuration and all its twin-swapped variants (same future)
+        for var in {cfg_key(swap(end, ax)) for ax in SWAPS}:
+            m.AddBoolOr([V['pos'][e][T][var[0][e]].Not() for e in range(6)] +
+                        [V['on'][e][T].Not() if var[1][e] else V['on'][e][T] for e in range(6)])
     return start, out, complete, time.time() - t0
 
 
 def cfg_key(c):
-    return (tuple(c[0]), tuple(c[1]))
+    return (tuple(c[0]), tuple(bool(x) for x in c[1]))
 
 
 def main():
@@ -114,9 +136,9 @@ def main():
             done += 1
             incomplete += not complete
             for end, states in ends:
-                k = cfg_key(end)
+                c = canon(end); k = cfg_key(c)
                 if k not in nxt:
-                    nxt[k] = end
+                    nxt[k] = c
                     parent[(i, k)] = (start, states)
             if done % 50 == 0 or done == len(jobs):
                 print(f'  layer {i}: {done}/{len(jobs)} starts done, {len(nxt)} end configs, '
@@ -149,9 +171,13 @@ def main():
         start, states = parent[(i, k)]
         segs.append(states)
         k = cfg_key(start) if start is not None else None
-    prog = []
+    prog = []; actual = None
     for states in reversed(segs):
+        if actual is not None:     # this segment starts in a twin variant of `actual`
+            ax = next(ax for ax in SWAPS if cfg_key(swap(states[0], ax)) == cfg_key(actual))
+            states = [swap(st, ax) for st in states]
         prog += _instructions(lg, states)
+        actual = states[-1]
     m = simulate(lg.geo, prog, n)
     print(f'{a.key} case {a.case}: FOUND a program, replay -> {m} lines', flush=True)
     assert m is not None and m <= target
