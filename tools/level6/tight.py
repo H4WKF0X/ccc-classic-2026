@@ -62,10 +62,13 @@ def build(lg, T, start, known):
 def enum_ends(args):
     """All end configurations of one copy in exactly T ticks from `start`.
     Returns (start, [(end_cfg, states)], complete, seconds)."""
-    key, case, T, start, known, secs = args
+    key, case, T, start, known, secs, part = args
     r, g, _ = load(key)[0][case]
     lg = LineGeo(r, g)
     m, V = build(lg, T, start, known)
+    if part is not None:       # only end configs with this many emitters on per axis (twin-invariant)
+        for a in range(3):
+            m.Add(V['on'][a][T] + V['on'][a + 3][T] == part[a])
     nq = len(V['pos'][0][0])
     out = []; t0 = time.time(); complete = True
     while True:
@@ -89,7 +92,7 @@ def enum_ends(args):
             states.append((q, [bool(sol.Value(V['on'][e][t])) for e in range(6)]))
         end = states[T]
         out.append((end, states))
-        if start is None or len(out) % 10 == 0:
+        if len(out) % 100 == 0:
             print(f'    enumeration from {"real start" if start is None else "a config"}: '
                   f'{len(out)} end configs so far, last solve {sol.WallTime():.1f}s, '
                   f'total {time.time() - t0:.0f}s', flush=True)
@@ -129,7 +132,10 @@ def main():
     for i in range(1, n + 1):
         T = f1 if i == 1 else w1
         t0 = time.time()
-        jobs = [(a.key, a.case, T, s, known, a.secs) for s in layer]
+        # few starts (layer 1 has one): split each enumeration into 27 twin-invariant parts
+        parts = [None] if len(layer) >= a.procs else \
+            [(x, y, z) for x in range(3) for y in range(3) for z in range(3)]
+        jobs = [(a.key, a.case, T, s, known, a.secs, pt) for s in layer for pt in parts]
         nxt = {}; incomplete = 0; done = 0
         last = i == n
         for start, ends, complete, secs in pool.imap_unordered(enum_ends, jobs):
@@ -140,7 +146,7 @@ def main():
                 if k not in nxt:
                     nxt[k] = c
                     parent[(i, k)] = (start, states)
-            if done % 50 == 0 or done == len(jobs):
+            if done % max(1, len(jobs) // 10) == 0 or done == len(jobs):
                 print(f'  layer {i}: {done}/{len(jobs)} starts done, {len(nxt)} end configs, '
                       f'{incomplete} incomplete, {time.time() - t0:.0f}s', flush=True)
             if last and nxt:
