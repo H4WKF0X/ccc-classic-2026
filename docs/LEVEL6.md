@@ -2,7 +2,6 @@
 
 Start here. This page explains the level, where everything lives, and how to run it.
 The deeper theory (optimality proofs, lower bounds) is in [`level6-theory.md`](level6-theory.md).
-All six level statements are in [`statements/`](statements/).
 
 ## The level in one paragraph
 
