@@ -1,80 +1,50 @@
-# ccc-rs: Cloudflight Coding Contest pipeline (Rust template)
+# ccc-classic-2026
 
-A fast, game-agnostic pipeline for the **Cloudflight Coding Contest**, built to benchmark an AI
-coding agent (Claude Code). It knows nothing about any puzzle. You point it at a downloaded level,
-the agent writes the solver, and the pipeline validates against the worked example **before**
-anything is uploaded, because a wrong upload costs penalty minutes.
+Our repo for the **Cloudflight Coding Contest Classic 2026**. It solves all six levels.
 
-This repo is a **template**. Each contest gets its own repo, made with `setup.sh` (any machine, no
-clone needed) or `new-contest.sh` (from a local clone).
+The repo starts from the [ccc-rs](https://github.com/H4WKF0X/ccc-rs) template. The harness, the
+checker and the Claude Code skills come from there. The contest statements are not in this repo.
 
-```
-setup.sh <name> -> cargo ccc login -> claude: /level  (fetch, guard, solve, all, submit, next level, ...)
-```
+## Result
 
-## Start a contest
+At the end of the contest, the team was 5th in Vienna and 17th in the world.
 
-**Contest day: follow [docs/CONTEST-DAY.md](docs/CONTEST-DAY.md)** (setup 10 minutes before, the
-online route, and the manual fallback).
+Level 6 is scored: the score is the number of program lines, and lower is better. The work on
+level 6 went on after the contest.
 
-On any machine (Linux/macOS; Windows: WSL), straight from this private repo, **without cloning it**.
-Needs `gh` logged in (`gh auth login`) with access to the repo:
+| | medium | large | enormous | total |
+|---|---:|---:|---:|---:|
+| contest end | 5,814 | 4,689 | 4,088 | 14,591 |
+| now, `results/level6/best/` | 5,800 | 4,600 | 3,954 | 14,354 |
+| proven optimal cases | 208/210 | 112/190 | 15/140 | |
 
-```bash
-gh api repos/H4WKF0X/ccc-rs/contents/setup.sh -H 'Accept: application/vnd.github.raw' | bash -s -- ccc-school-2026
-```
+[docs/LEVEL6.md](docs/LEVEL6.md) explains the level, the solver, the tools and how to run them.
+[docs/level6-theory.md](docs/level6-theory.md) holds the optimality proofs and the lower bounds.
 
-That checks the tools (with install hints), downloads a snapshot of the template into
-`~/projects/ccc-school-2026`, makes it the contest repo (git, build, login check), and prints the
-contest-day steps. Then: `cd ~/projects/ccc-school-2026 && claude`, and `/level`.
+## Run
 
-Working on the template itself: `./new-contest.sh <name>` does the same from this local clone.
-
-`/level` drives everything with ordinary commands, which you can also run yourself:
+The setup is the same as in the ccc-rs template: Rust (stable, edition 2024), Node.js for the
+checker, and Claude Code for the skills.
 
 ```bash
-cargo ccc login                  # who you are (login read from Firefox) + which contest was found
-cargo ccc fetch 3                # download + ingest level 3
-cargo ccc validate 3             # example: GO / GO (checker) / NO-GO with the first difference
-cargo ccc all 3                  # solve all real inputs once (in parallel), save + check the outputs
-cargo ccc submit 3               # re-validate, require current + checked outputs, confirm, upload
+cargo ccc validate 3             # check level 3 against the worked example
+cargo ccc all 3                  # solve all inputs of level 3 and check the outputs
+cargo ccc all 6 --budget 600     # optimise level 6 for 10 minutes per file
 ```
 
-Other commands: `progress`, `mode [online|manual]`, `ingest <zip|dir|files> [--level N]`, `run N <in> [out]`,
-`bench N`, `new-level N [--from M]`, `status`, `guard N` (re-run the PDF check).
-
-**For humans only:** `cargo ccc guard-html N` checks a level's sandbox HTML for text aimed at an AI
-(Claude reads its source; you only see it run). It prints what it finds and offers to quarantine the
-file. Claude is blocked from running it, because its output contains the untrusted text. `cargo ccc` is a cargo alias, so it works the same everywhere.
+The inputs are not in the repo. `cargo ccc ingest <zip>` reads a downloaded level into `work/`.
 
 ## Layout
 
 | Path | Purpose |
 |------|---------|
-| `harness/` | The engine: I/O contract, ingest, validation, CLI, platform client. Levels don't edit it. |
-| `solution/src/levels/level<N>.rs` | One solver per level, registered automatically by `solution/build.rs`. |
-| `solution/src/model.rs` | Parsing/data model shared between levels. |
-| `templates/level.rs` | Stub for `cargo ccc new-level N`. |
-| `ccc.toml` / `ccc.local.toml` | Contest settings / personal overrides (git-ignored). |
-| `CLAUDE.md`, `.claude/skills/` | Project memory; `/level` (the loop), `/optimize` (scored levels), `/solve`, `/review`. |
-| `docs/PLATFORM.md` | The codingcontest.org API, credentials setup, HAR capture guide. |
-| `checker/` | Judges many-valid-answer levels with the game's own sandbox script (on by default, self-tested). |
-| `tools/sanitize_har.py` | Strip secrets from a browser HAR before sharing it. |
-| `harness/src/guard.rs` | Prompt-injection guard: hidden text in statement PDFs (runs on every fetch/ingest, ~5 s). |
-| `tools/notify.sh` | Sound when Claude needs you (Claude Code hook in `.claude/settings.json`). |
-| `work/` | Runtime only (git-ignored): ingested inputs, produced outputs, statements. |
-
-## Setup
-
-1. Rust (stable, edition 2024): `rustup` or your distro's package. Check with `cargo --version`.
-2. Claude Code: `npm install -g @anthropic-ai/claude-code`, then `claude` once to sign in.
-3. Node.js (for the sandbox checker), Firefox (the login is read from it) and Ghostscript `gs` (for the
-   prompt-injection guard; usually preinstalled on Linux, `brew install ghostscript` on macOS).
-4. Optional: open a contest repo in RustRover / IntelliJ with the Rust plugin.
-
-## Team workflow (one contest repo)
-
-- `main` is the source of truth. Pull before each level: `git pull --rebase`.
-- One person drives the current level with Claude Code. The others ingest the next level, run
-  `/review`, or build a quick visualiser. Commit each cleared level: `git commit -am "level 3"`.
-- **Agree who submits** each level so nobody double-uploads and eats penalties.
+| `solution/src/levels/level<N>.rs` | One solver per level. Levels 1 to 5 are short, level 6 is the beam search and the optimiser. |
+| `solution/src/model.rs` | The hex board model that the levels share. |
+| `harness/` | The engine from the template: I/O, ingest, validation, CLI, platform client. |
+| `checker/` | Judges levels with many valid answers with the game's own sandbox script. |
+| `tools/level6/` | Python tools for level 6: exact proofs, lower bounds, window re-optimisation. |
+| `tools/dashboard/` | A local live dashboard for the level 6 runs. |
+| `results/level6/` | The best program per case, the bounds and the logs. |
+| `docs/` | The level 6 notes, the theory, the contest day runbook and the platform API. |
+| `CLAUDE.md`, `.claude/skills/` | Project memory and the skills: `/level`, `/optimize`, `/solve`, `/review`. |
+| `work/` | Runtime only (git-ignored): inputs, outputs, statements. |
