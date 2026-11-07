@@ -4,6 +4,9 @@
 # Runtime working area (ingested inputs, produced outputs, statements)
 /work/
 
+# Programs collected from other teams, kept local only
+/results/level6/pool.tar.xz
+
 # Secrets — each teammate keeps their own, never commit
 ccc.local.toml
 *.har

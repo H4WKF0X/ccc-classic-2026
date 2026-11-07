@@ -39,7 +39,7 @@ levels correct); it is post-contest and unofficial.
 | `solution/src/levels/level6.rs` | The solver inside the harness (Rust). Fast beam search + optimiser. |
 | `tools/level6/` | Python tools: exact proofs, lower bounds, window re-optimisation, helpers. |
 | `results/level6/best/` | The best program per case, one file per input. |
-| `results/level6/pool.tar.xz` | Every distinct program we collected during the contest (ours + 3 other teams' repos + downloads). |
+| `results/level6/pool.tar.xz` | Local only (git-ignored). Every distinct program we collected during the contest (ours + 3 other teams' repos + downloads). |
 | `results/level6/*.csv` | Bounds and proofs per case (`bounds.csv` is the summary). |
 | `docs/level6-theory.md` | The theory: line coordinates, the exact model, decomposition bounds, numbers. |
 | `work/level6/` | Working area (git-ignored): inputs, current `best/`, `pool/`, third-party code, archive. |
