@@ -15,8 +15,8 @@ level 6 went on after the contest.
 | | medium | large | enormous | total |
 |---|---:|---:|---:|---:|
 | contest end | 5,814 | 4,689 | 4,088 | 14,591 |
-| now, `results/level6/best/` | 5,800 | 4,600 | 3,954 | 14,354 |
-| proven optimal cases | 208/210 | 112/190 | 15/140 | |
+| now, `results/level6/best/` | 5,800 | 4,596 | 3,954 | 14,350 |
+| proven optimal cases | 208/210 | 115/190 | 15/140 | |
 
 [docs/LEVEL6.md](docs/LEVEL6.md) explains the level, the solver, the tools and how to run them.
 [docs/level6-theory.md](docs/level6-theory.md) holds the optimality proofs and the lower bounds.
